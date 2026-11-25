@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.100.0"
 license = "MIT OR Apache-2.0"
 publish = false
-description = "BurnCloud 的契约和整体框架。业务代码在 burncloud/commerce。"
+description = "BurnCloud 的契约签名（函数地图）：只定每块积木的参数和结果。业务实现在 burncloud/commerce。"
 
 [lints.rust]
 unsafe_code = "forbid"

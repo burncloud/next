@@ -1,6 +1,6 @@
 # BurnCloud next
 
-本仓库只放 BurnCloud 的契约和整体框架。业务代码放在单独仓库，例如 [burncloud/commerce](https://github.com/burncloud/commerce)。
+本仓库是契约签名，也就是函数地图：只规定每块积木的接口（参数进、结果出），不放实现。业务代码放在单独仓库，例如 burncloud/commerce。
 
 `.github/workflows/ci.yml` 调用 [burncloud/ci](https://github.com/burncloud/ci) 的共享工作流，用来在另一个仓库里跑出真实的检查名。
 
