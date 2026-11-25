@@ -1,3 +1,24 @@
-mod money;
+pub const MINOR_UNITS_PER_MAJOR: u64 = 1_000_000_000;
 
-pub use money::{Currency, Money, MoneyError, Pricing, MINOR_UNITS_PER_MAJOR};
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Currency {
+    Usd,
+    Cny,
+    Eur,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Money {
+    pub currency: Currency,
+    pub minor_units: u64,
+}
+
+pub trait Pricing {
+    type Usage;
+    type Error;
+
+    /// # Errors
+    ///
+    /// 用量无法计价时返回 `Self::Error`。
+    fn price(&self, usage: &Self::Usage) -> Result<Money, Self::Error>;
+}

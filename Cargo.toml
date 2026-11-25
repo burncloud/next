@@ -7,7 +7,5 @@ license = "MIT OR Apache-2.0"
 publish = false
 description = "BurnCloud 的契约和整体框架。业务代码在 burncloud/commerce。"
 
-[dependencies]
-
 [lints.rust]
 unsafe_code = "forbid"
