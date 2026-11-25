@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "burncloud-template"
+name = "next"
 version = "0.1.0"

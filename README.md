@@ -1,6 +1,8 @@
-# burncloud-template
+# BurnCloud 新主仓库
 
-BurnCloud 各 Rust crate 仓库的模板。仓库根的清单、锁文件和工具链可以直接复制到新仓库。`.github/workflows/ci.yml` 调用 [burncloud/ci](https://github.com/burncloud/ci) 的共享工作流，用来在另一个仓库里跑出真实的检查名。
+功能将从 [burncloud/burncloud](https://github.com/burncloud/burncloud) 逐个迁移。
+
+`.github/workflows/ci.yml` 调用 [burncloud/ci](https://github.com/burncloud/ci) 的共享工作流，用来在另一个仓库里跑出真实的检查名。
 
 当前钉的是带注释的 tag `v1.0.0`，它指向 `56aa8aabde61bc50e41e0b63ed345caa4810604a`。`uses` 只允许 40 位完整 SHA，或 `vX.Y.Z` 这种不可变标签。禁止 `v1` 这类会移动的浮动标签，也禁止分支名。
 

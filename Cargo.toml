@@ -1,6 +1,6 @@
 # 模板库不发布。复制到新 crate 仓库后，再按那个 crate 的发布策略改 publish。
 [package]
-name = "burncloud-template"
+name = "next"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.100.0"
