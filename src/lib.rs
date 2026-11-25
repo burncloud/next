@@ -7,7 +7,7 @@
 /// # Examples
 ///
 /// ```
-/// use burncloud_template::checked_add;
+/// use next::checked_add;
 ///
 /// assert_eq!(checked_add(2, 2), Some(4));
 /// assert_eq!(checked_add(u64::MAX, 1), None);
