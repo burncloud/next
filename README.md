@@ -1,24 +1,25 @@
-# BurnCloud 新主仓库
+# BurnCloud next
 
-功能将从 [burncloud/burncloud](https://github.com/burncloud/burncloud) 逐个迁移。
+本仓库只放 BurnCloud 的契约和整体框架。业务代码放在单独仓库，例如 [burncloud/commerce](https://github.com/burncloud/commerce)。
 
 `.github/workflows/ci.yml` 调用 [burncloud/ci](https://github.com/burncloud/ci) 的共享工作流，用来在另一个仓库里跑出真实的检查名。
 
 调用方 `uses` 用 `@latest`。每次 burncloud/ci 合并后先打 `vX.Y.Z`，再把 `latest` 移到同一提交。也可以钉 40 位完整 SHA，或不可移动的 `vX.Y.Z`。其他浮动名（`v1`、`main` 等）仍然禁止。
 
-## 用这个模板新建 crate 仓库
+## 业务仓库
 
-1. 用 GitHub 的模板仓库功能创建新仓库，或把本仓库里提交的文件复制到新仓库根目录。
-2. 这些文件放进**默认分支的第一笔提交**。不要靠之后的 pull request 补 `.github/`、`rust-toolchain.toml` 或 `Cargo.toml` 的 `[lints]`，防作弊检查会拒绝。
-3. 把包名、说明和库代码换成新 crate 的内容。保持 `edition`、`rust-version`、`[lints.rust] unsafe_code = "forbid"`，并重新生成后提交 `Cargo.lock`。
-4. 不引入第三方依赖时，不必提交 `supply-chain/`。一旦依赖来自 crates.io，或其他不是 `git+https://github.com/burncloud/` 的来源，就要 `cargo vet init` 并提交 `supply-chain/`，否则 `cargo vet` 会失败。
-5. 工具链继续用仓库根的 `rust-toolchain.toml`，不要改成浮动的 `stable`。
+业务代码不写在本仓库。新的业务仓库单独创建，例如 burncloud/commerce，用 git tag 或 40 位 rev 依赖这里的契约。
 
-本模板不提交 `deny.toml`。共享工作流会从调用方仓库向上查找；找不到时使用 `burncloud/ci` 里的默认 `deny.toml`。只有策略和默认值不同时才在调用方提交自己的文件，而那个文件一旦提交就受保护。
+1. 业务仓库自己的第一笔提交包含 `.github/`、`rust-toolchain.toml` 和 `Cargo.toml` 的 `[lints]`。不要靠之后的 pull request 补这些路径。
+2. 保持 `edition`、`rust-version`、`[lints.rust] unsafe_code = "forbid"`，并提交 `Cargo.lock`。
+3. 依赖来自 crates.io，或其他不是 `git+https://github.com/burncloud/` 的来源时，提交 `supply-chain/`。
+4. 工具链用仓库根的 `rust-toolchain.toml`，不要改成浮动的 `stable`。
 
-## 从本模板新建仓库后必须做的设置
+本仓库不提交 `deny.toml`。共享工作流会从调用方仓库向上查找；找不到时使用 `burncloud/ci` 里的默认 `deny.toml`。只有策略和默认值不同时才在调用方提交自己的文件，而那个文件一旦提交就受保护。
 
-下面的设置由新建仓库的人来做。本模板只把要求写在这里，不改组织设置，也不改任何仓库的规则集。
+## 仓库设置
+
+下面是本仓库和业务仓库都要遵守的设置。这里不改组织设置，也不改任何仓库的规则集。
 
 调用方工作流 `.github/workflows/ci.yml` 的名字是 `CI`，不要改成 `Rust`。`uses` 用 `@latest`。每次 burncloud/ci 合并后先打 `vX.Y.Z`，再把 `latest` 移到同一提交。其他浮动名（`v1`、`main` 等）仍然禁止。检查名里的 `rust /` 来自 job id `rust`。
 

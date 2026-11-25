@@ -1,19 +1,7 @@
-#[must_use]
-pub const fn checked_add(left: u64, right: u64) -> Option<u64> {
-    left.checked_add(right)
-}
+#![allow(
+    clippy::missing_errors_doc,
+    reason = "contract functions return typed errors and this crate does not carry doc comments"
+)]
 
-#[cfg(test)]
-mod tests {
-    use super::checked_add;
-
-    #[test]
-    fn adds_two_and_two() {
-        assert_eq!(checked_add(2, 2), Some(4));
-    }
-
-    #[test]
-    fn rejects_overflow() {
-        assert_eq!(checked_add(u64::MAX, 1), None);
-    }
-}
+pub mod money;
+pub mod pricing;
