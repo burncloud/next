@@ -8,7 +8,6 @@ publish = false
 description = "BurnCloud 的契约和整体框架。业务代码在 burncloud/commerce。"
 
 [dependencies]
-chrono = { version = "=0.4.45", default-features = false, features = ["std", "serde"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.154", features = ["raw_value"] }
 thiserror = "=2.0.21"

@@ -1,5 +1,4 @@
 use crate::money::{Currency, Money, MoneyError};
-use chrono::{DateTime, Utc};
 use serde::de::Error as DeserializeError;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
@@ -12,7 +11,7 @@ use thiserror::Error;
 #[must_use]
 pub struct PricingConfig {
     version: String,
-    updated_at: DateTime<Utc>,
+    updated_at: Timestamp,
     source: String,
     models: BTreeMap<String, ModelPricing>,
 }
@@ -121,6 +120,8 @@ pub enum PricingError {
     #[error("invalid currency code")]
     Currency,
     #[error(transparent)]
+    Timestamp(#[from] TimestampError),
+    #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error("invalid tier")]
     InvalidTier,
@@ -153,7 +154,7 @@ impl PricingConfig {
         root.insert("version".to_owned(), Value::String(self.version.clone()));
         root.insert(
             "updated_at".to_owned(),
-            serde_json::to_value(self.updated_at)?,
+            Value::String(self.updated_at.as_str().to_owned()),
         );
         root.insert("source".to_owned(), Value::String(self.source.clone()));
         let mut models = Map::new();
@@ -170,8 +171,8 @@ impl PricingConfig {
     }
 
     #[must_use]
-    pub fn updated_at(&self) -> DateTime<Utc> {
-        self.updated_at
+    pub fn updated_at(&self) -> &Timestamp {
+        &self.updated_at
     }
 
     #[must_use]
@@ -444,12 +445,110 @@ impl<'de> Deserialize<'de> for DecimalAmount {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+pub struct Timestamp(String);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[must_use]
+pub enum TimestampError {
+    #[error("invalid timestamp")]
+    Invalid,
+}
+
+impl Timestamp {
+    pub fn parse(text: &str) -> Result<Self, TimestampError> {
+        if text.len() < 20 {
+            return Err(TimestampError::Invalid);
+        }
+        let bytes = text.as_bytes();
+        if bytes[4] != b'-'
+            || bytes[7] != b'-'
+            || bytes[10] != b'T'
+            || bytes[13] != b':'
+            || bytes[16] != b':'
+        {
+            return Err(TimestampError::Invalid);
+        }
+        let year = timestamp_number(text, 0, 4)?;
+        let month = timestamp_number(text, 5, 7)?;
+        let day = timestamp_number(text, 8, 10)?;
+        let hour = timestamp_number(text, 11, 13)?;
+        let minute = timestamp_number(text, 14, 16)?;
+        let second = timestamp_number(text, 17, 19)?;
+        if !(1..=12).contains(&month)
+            || day == 0
+            || day > days_in_month(year, month)
+            || hour > 23
+            || minute > 59
+            || second > 60
+            || !timestamp_suffix_ok(&text[19..])
+        {
+            return Err(TimestampError::Invalid);
+        }
+        Ok(Self(text.to_owned()))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+fn timestamp_number(text: &str, start: usize, end: usize) -> Result<u32, TimestampError> {
+    let slice = text.get(start..end).ok_or(TimestampError::Invalid)?;
+    if !slice.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(TimestampError::Invalid);
+    }
+    slice.parse().map_err(|_| TimestampError::Invalid)
+}
+
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year.is_multiple_of(400) || (year.is_multiple_of(4) && !year.is_multiple_of(100)) => {
+            29
+        }
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn timestamp_suffix_ok(rest: &str) -> bool {
+    let rest = match rest.strip_prefix('.') {
+        Some(after) => {
+            let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+            if digits == 0 {
+                return false;
+            }
+            &after[digits..]
+        }
+        None => rest,
+    };
+    if rest == "Z" {
+        return true;
+    }
+    let Some(sign) = rest.as_bytes().first() else {
+        return false;
+    };
+    if *sign != b'+' && *sign != b'-' {
+        return false;
+    }
+    let body = &rest[1..];
+    let bytes = body.as_bytes();
+    bytes.len() == 5
+        && bytes[2] == b':'
+        && timestamp_number(body, 0, 2).is_ok_and(|hour| hour <= 23)
+        && timestamp_number(body, 3, 5).is_ok_and(|minute| minute <= 59)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WireV1 {
     #[serde(default = "default_version")]
     version: String,
-    updated_at: DateTime<Utc>,
+    updated_at: String,
     source: String,
     models: BTreeMap<String, WireModel>,
 }
@@ -551,7 +650,7 @@ struct WireRealtime {
 struct WireV7 {
     #[serde(default = "default_version")]
     version: String,
-    updated_at: DateTime<Utc>,
+    updated_at: String,
     source: String,
     models: BTreeMap<String, BTreeMap<String, WireV7Currency>>,
 }
@@ -781,7 +880,7 @@ fn convert_v1(wire: WireV1) -> Result<PricingConfig, PricingError> {
     }
     Ok(PricingConfig {
         version: wire.version,
-        updated_at: wire.updated_at,
+        updated_at: Timestamp::parse(&wire.updated_at)?,
         source: wire.source,
         models,
     })
@@ -887,7 +986,7 @@ fn convert_v7(wire: WireV7) -> Result<PricingConfig, PricingError> {
     }
     Ok(PricingConfig {
         version: wire.version,
-        updated_at: wire.updated_at,
+        updated_at: Timestamp::parse(&wire.updated_at)?,
         source: wire.source,
         models,
     })

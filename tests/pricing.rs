@@ -197,6 +197,12 @@ fn rejects_mixed_layouts_and_keeps_streaming_default() {
     }"#;
     let config = PricingConfig::from_json(metadata).unwrap();
     let metadata = config.models().get("m").unwrap().metadata().unwrap();
+    assert_eq!(config.updated_at().as_str(), "2026-03-29T00:00:00Z");
+    let bad_time = r#"{"version":"1.0","updated_at":"yesterday","source":"test","models":{}}"#;
+    assert!(matches!(
+        PricingConfig::from_json(bad_time),
+        Err(PricingError::Timestamp(_))
+    ));
     assert!(metadata.supports_streaming);
     assert!(!metadata.supports_vision);
     assert_eq!(metadata.context_window, Some(128_000));
