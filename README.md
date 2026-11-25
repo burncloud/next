@@ -12,7 +12,7 @@
 
 1. 业务仓库自己的第一笔提交包含 `.github/`、`rust-toolchain.toml` 和 `Cargo.toml` 的 `[lints]`。不要靠之后的 pull request 补这些路径。
 2. 保持 `edition`、`rust-version`、`[lints.rust] unsafe_code = "forbid"`，并提交 `Cargo.lock`。
-3. 依赖来自 crates.io，或其他不是 `git+https://github.com/burncloud/` 的来源时，提交 `supply-chain/`。
+3. 本仓库不引入第三方依赖。业务仓库若要依赖 crates.io，按共享工作流的供应链检查自行处理，不要把审计文件提交进 next。
 4. 工具链用仓库根的 `rust-toolchain.toml`，不要改成浮动的 `stable`。
 
 本仓库不提交 `deny.toml`。共享工作流会从调用方仓库向上查找；找不到时使用 `burncloud/ci` 里的默认 `deny.toml`。只有策略和默认值不同时才在调用方提交自己的文件，而那个文件一旦提交就受保护。
@@ -129,4 +129,4 @@ bash .burncloud-ci/scripts/run-cargo-vet.sh .
 bash .burncloud-ci/scripts/check-unsafe.sh .
 ```
 
-`cargo audit` 在没有 `Cargo.lock` 时会失败，所以锁文件必须提交。没有第三方依赖时，`run-cargo-vet.sh` 用临时空策略运行 `cargo vet`，不需要把 `supply-chain/` 提交进仓库。
+`cargo audit` 在没有 `Cargo.lock` 时会失败，所以锁文件必须提交。本仓库没有第三方依赖，供应链检查使用共享工作流的临时空策略。

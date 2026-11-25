@@ -1,7 +1,3 @@
-#![allow(
-    clippy::missing_errors_doc,
-    reason = "contract functions return typed errors and this crate does not carry doc comments"
-)]
+mod money;
 
-pub mod money;
-pub mod pricing;
+pub use money::{Currency, Money, MoneyError, Pricing, MINOR_UNITS_PER_MAJOR};
