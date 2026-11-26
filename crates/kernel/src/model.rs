@@ -17,3 +17,9 @@ pub struct AccountId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KeyId(pub String);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct UnixMillis(pub u64);
