@@ -24,6 +24,8 @@ pub trait Gateway {
     /// # Errors
     ///
     /// 被拒绝时返回由 `Rejection` 转换来的 `Self::Error`。上游或存储失败时返回 `Self::Error`。
+    ///
+    /// 其余 `BillingRejection`（如 `Overflow`、`HoldNotFound`）以及 `WalletError::Storage` 按内部错误作为 `Self::Error` 返回，不映射成 `Rejection`。
     fn handle(
         &self,
         key: &str,
