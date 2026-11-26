@@ -1,4 +1,4 @@
-use kernel::model::{AccountId, Currency, Money, RequestId};
+use kernel::model::{AccountId, Currency, KeyId, Money, RequestId, UnixMillis};
 
 use crate::model::Entry;
 
@@ -20,6 +20,8 @@ pub trait Wallet {
     /// 读不到该账号该币种的余额时返回 `Self::Error`。
     fn balance(&self, account: &AccountId, currency: Currency) -> Result<Money, Self::Error>;
 
+    /// 密钥限额的币种和这笔冻结的币种不一致时拒绝，不换算。`Daily` 和 `Monthly` 的周期起点是 UTC 自然日、自然月；`since` 由调用方按 UTC 计算。
+    ///
     /// # Errors
     ///
     /// 可用余额不足，或同一个 `request` 已经冻结过时，返回 `Self::Error`。
@@ -27,6 +29,7 @@ pub trait Wallet {
         &self,
         request: &RequestId,
         account: &AccountId,
+        key: &KeyId,
         amount: Money,
     ) -> Result<(), Self::Error>;
 
@@ -41,6 +44,16 @@ pub trait Wallet {
     ///
     /// 没有这个 `request` 的冻结时返回 `Self::Error`。
     fn release(&self, request: &RequestId) -> Result<(), Self::Error>;
+
+    /// # Errors
+    ///
+    /// 读取失败时返回 `Self::Error`。
+    fn spent(
+        &self,
+        key: &KeyId,
+        currency: Currency,
+        since: UnixMillis,
+    ) -> Result<Money, Self::Error>;
 }
 
 pub trait Ledger {
