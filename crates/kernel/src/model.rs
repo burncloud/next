@@ -14,3 +14,6 @@ pub struct Money {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AccountId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RequestId(pub String);
