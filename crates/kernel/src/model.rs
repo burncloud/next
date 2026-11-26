@@ -4,7 +4,6 @@ pub const MINOR_UNITS_PER_MAJOR: u64 = 1_000_000_000;
 pub enum Currency {
     Usd,
     Cny,
-    Eur,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
