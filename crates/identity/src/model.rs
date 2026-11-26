@@ -1,4 +1,4 @@
-use kernel::model::Money;
+use kernel::model::{AccountId, KeyId, Money};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LimitPeriod {
@@ -20,4 +20,10 @@ pub struct RequestsPerMinute(pub u32);
 pub struct KeyLimit {
     pub spend: Option<SpendLimit>,
     pub requests_per_minute: Option<RequestsPerMinute>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Principal {
+    pub account: AccountId,
+    pub key: KeyId,
 }
