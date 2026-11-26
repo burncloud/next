@@ -23,7 +23,7 @@ pub enum LedgerAccount {
 pub struct Entry {
     pub request: RequestId,
     pub account: LedgerAccount,
-    pub key: KeyId,
+    pub key: Option<KeyId>,
     pub direction: Direction,
     pub amount: Money,
     pub at: UnixMillis,
