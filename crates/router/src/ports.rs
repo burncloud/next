@@ -19,8 +19,6 @@ pub trait Adapter {
 pub trait Upstream {
     type Error;
 
-    /// 把请求体发给上游，返回响应体。
-    ///
     /// # Errors
     ///
     /// 上游调用失败时返回 `Self::Error`。
