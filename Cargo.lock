@@ -1,5 +1,28 @@
 version = 4
 
 [[package]]
-name = "next"
+name = "billing"
+version = "0.1.0"
+dependencies = [
+ "kernel",
+]
+
+[[package]]
+name = "identity"
+version = "0.1.0"
+
+[[package]]
+name = "kernel"
+version = "0.1.0"
+
+[[package]]
+name = "router"
+version = "0.1.0"
+
+[[package]]
+name = "runtime"
+version = "0.1.0"
+
+[[package]]
+name = "supply"
 version = "0.1.0"

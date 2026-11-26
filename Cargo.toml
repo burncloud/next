@@ -1,11 +1,21 @@
-[package]
-name = "next"
+[workspace]
+resolver = "2"
+members = [
+    "crates/kernel",
+    "crates/identity",
+    "crates/billing",
+    "crates/supply",
+    "crates/router",
+    "crates/runtime",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.100.0"
 license = "MIT OR Apache-2.0"
 publish = false
-description = "BurnCloud crate 仓库模板中的最小库。"
+description = "BurnCloud 的契约签名（函数地图）：只定每块积木的接口（参数进、结果出）。"
 
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "forbid"
