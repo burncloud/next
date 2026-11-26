@@ -10,6 +10,9 @@ dependencies = [
 [[package]]
 name = "identity"
 version = "0.1.0"
+dependencies = [
+ "kernel",
+]
 
 [[package]]
 name = "kernel"
