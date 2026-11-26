@@ -22,4 +22,4 @@ pub struct RequestId(pub String);
 pub struct KeyId(pub String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Timestamp(pub u64);
+pub struct UnixMillis(pub u64);
