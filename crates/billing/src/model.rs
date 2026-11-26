@@ -28,3 +28,9 @@ pub struct Entry {
     pub amount: Money,
     pub at: UnixMillis,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KeyCap {
+    pub since: UnixMillis,
+    pub limit: Money,
+}

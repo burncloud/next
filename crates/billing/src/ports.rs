@@ -1,6 +1,6 @@
 use kernel::model::{AccountId, Currency, KeyId, Money, RequestId, UnixMillis};
 
-use crate::model::Entry;
+use crate::model::{Entry, KeyCap};
 
 pub trait Pricing {
     type Usage;
@@ -20,22 +20,25 @@ pub trait Wallet {
     /// 读不到该账号该币种的余额时返回 `Self::Error`。
     fn balance(&self, account: &AccountId, currency: Currency) -> Result<Money, Self::Error>;
 
+    /// 带 `cap` 时，在同一次冻结里原子地检查：该密钥自 `cap.since` 起已结算的花费，加上当前冻结，再加上 `amount`，不超过 `cap.limit`。`cap.limit` 与 `amount` 币种不同时直接拒绝，不换算。
+    ///
     /// # Errors
     ///
-    /// 可用余额不足，或同一个 `request` 已经冻结过时，返回 `Self::Error`。
+    /// 可用余额不足、同一个 `request` 已经冻结过、超过限额，或币种不一致时，返回 `Self::Error`。
     fn hold(
         &self,
         request: &RequestId,
         account: &AccountId,
         key: &KeyId,
+        cap: Option<KeyCap>,
         amount: Money,
     ) -> Result<(), Self::Error>;
 
-    /// 按实际金额结算这笔冻结，结算后冻结结束，没用完的部分退回可用余额。
+    /// 按实际金额结算这笔冻结，结算后冻结结束，没用完的部分退回可用余额。调用方先把实际金额封顶到冻结额。
     ///
     /// # Errors
     ///
-    /// 没有这个 `request` 的冻结，或金额超过冻结额时，返回 `Self::Error`。同一个 `request` 再结算一次也返回 `Self::Error`，不能扣第二次。
+    /// 没有这个 `request` 的冻结，或实际金额超过冻结额时，返回 `Self::Error`。同一个 `request` 再结算一次也返回 `Self::Error`，不能扣第二次。
     fn settle(&self, request: &RequestId, amount: Money) -> Result<(), Self::Error>;
 
     /// # Errors
