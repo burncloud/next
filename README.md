@@ -1,6 +1,6 @@
 # BurnCloud next
 
-本仓库只放契约签名，是模块之间的函数地图：只规定每块积木的接口（参数进、结果出），不放实现。业务实现按领域放在单独仓库。
+本仓库是 BurnCloud 的整体框架，只放契约签名，是模块之间的函数地图：只规定每块积木的接口（参数进、结果出），不放实现。业务实现按领域放在单独仓库。
 
 `crates/` 下六个领域：`kernel`（钱、币种、ID、时间、事件）、`identity`（账号、密钥、权限）、`billing`（钱包、计量、计价、套餐、账本）、`supply`（渠道、模型目录）、`router`（请求入口、调度、协议适配）、`runtime`（系统组装入口、后台任务）。每个 crate 的 `src/` 只有 `lib.rs`、`model.rs`、`ports.rs`、`events.rs`、`errors.rs`。依赖单向：`runtime` → `router` → `identity` / `billing` / `supply` → `kernel`。同层不互相依赖。
 
@@ -44,12 +44,13 @@
 
 仓库设置里还要做两件事：外部贡献者的 pull request 在跑 Actions 之前必须先批准；关闭「允许 GitHub Actions 创建和批准 PR」。
 
-这次在私有调用方上实测到的 19 个检查名：
+这次 pull request 实测到的 20 个检查名：
 
 | 检查名 | 设为必需 |
 | --- | --- |
 | `rust / lint / fmt` | 是 |
 | `rust / lint / clippy` | 是 |
+| `rust / lint / comments` | 是 |
 | `rust / lint / unsafe` | 是 |
 | `rust / test / cargo-test` | 是 |
 | `rust / test / doc-test` | 是 |

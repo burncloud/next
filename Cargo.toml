@@ -15,7 +15,7 @@ edition = "2021"
 rust-version = "1.100.0"
 license = "MIT OR Apache-2.0"
 publish = false
-description = "BurnCloud 的契约签名（函数地图）：只定每块积木的接口（参数进、结果出）。"
+description = "BurnCloud 整体框架：各领域积木的接口总图（参数进、结果出），只放签名。"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
