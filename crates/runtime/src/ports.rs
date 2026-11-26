@@ -7,6 +7,8 @@ pub trait Gateway {
     ///
     /// 认证：`ApiKeys::authenticate` 返回 `None` 时为 `Rejection::Unauthenticated`；`limit` 返回 `None` 时为 `Rejection::UnknownKey`。
     ///
+    /// 限流：有 `RequestsPerMinute` 时用 `Clock::now` 调用 `RateLimiter::admit`，没有时不限流。`Admission::Throttled` 时为 `Rejection::RateLimited`，不冻结、不调用上游。
+    ///
     /// `RequestId`：带 `idempotency_key` 时用它，并按账号隔离；没带时网关生成。同一 `RequestId` 已经冻结或结算过时为 `Rejection::DuplicateRequest`，不再冻结、不再调用上游，不会重复扣费。
     ///
     /// 冻结额：`Adapter::estimate_usage` 加 `Pricing` 定冻结额；没带 `max_tokens` 时按模型最大输出上限估算。
