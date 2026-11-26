@@ -32,8 +32,8 @@ pub trait Wallet {
     /// 可用余额不足时返回 `WalletError::Rejected(BillingRejection::InsufficientBalance)`。同一个 `account` 和 `request` 已经冻结过时返回 `WalletError::Rejected(BillingRejection::DuplicateRequest)`。超过限额时返回 `WalletError::Rejected(BillingRejection::LimitExceeded)`。币种不一致时返回 `WalletError::Rejected(BillingRejection::CurrencyMismatch)`。金额相加溢出时返回 `WalletError::Rejected(BillingRejection::Overflow)`。存储失败时返回 `WalletError::Storage`。
     fn hold(
         &self,
-        request: &RequestId,
         account: &AccountId,
+        request: &RequestId,
         key: &KeyId,
         cap: Option<KeyCap>,
         amount: Money,
@@ -91,7 +91,7 @@ pub trait Ledger {
 
     /// # Errors
     ///
-    /// 借贷不平，或金额相加溢出时，返回 `WalletError::Rejected(BillingRejection::Overflow)`。条目混用币种时返回 `WalletError::Rejected(BillingRejection::CurrencyMismatch)`，不换算。存储失败时返回 `WalletError::Storage`。
+    /// 借贷不平返回 `WalletError::Rejected(BillingRejection::Unbalanced)`。金额相加溢出返回 `WalletError::Rejected(BillingRejection::Overflow)`。混用币种返回 `WalletError::Rejected(BillingRejection::CurrencyMismatch)`，不换算。存储失败返回 `WalletError::Storage`。
     fn record(
         &self,
         entries: &[Entry],

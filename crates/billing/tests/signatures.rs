@@ -35,8 +35,8 @@ impl Wallet for Stub {
 
     fn hold(
         &self,
-        _request: &RequestId,
         _account: &AccountId,
+        _request: &RequestId,
         _key: &KeyId,
         _cap: Option<KeyCap>,
         _amount: Money,
@@ -107,7 +107,8 @@ fn rejection_code(reason: BillingRejection) -> u8 {
         BillingRejection::SettlementExceedsHold => 5,
         BillingRejection::AlreadySettled => 6,
         BillingRejection::AlreadyReleased => 7,
-        BillingRejection::Overflow => 8,
+        BillingRejection::Unbalanced => 8,
+        BillingRejection::Overflow => 9,
     }
 }
 
@@ -126,7 +127,7 @@ fn wallet_ledger_and_pricing_signatures_are_usable() {
         limit: amount,
     };
     drive(wallet.balance(&account, Currency::Usd));
-    drive(wallet.hold(&request, &account, &key, Some(cap), amount));
+    drive(wallet.hold(&account, &request, &key, Some(cap), amount));
     drive(wallet.settle(&account, &request, amount));
     drive(wallet.release(&account, &request));
     drive(wallet.held(&account, &request));

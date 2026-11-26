@@ -8,6 +8,7 @@ pub enum BillingRejection {
     SettlementExceedsHold,
     AlreadySettled,
     AlreadyReleased,
+    Unbalanced,
     Overflow,
 }
 
