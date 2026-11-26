@@ -2,8 +2,8 @@
 pub enum Rejection {
     Unauthenticated,
     UnknownKey,
+    DuplicateRequest,
     CurrencyMismatch,
     LimitExceeded,
     InsufficientBalance,
-    UsageUnreadable,
 }
