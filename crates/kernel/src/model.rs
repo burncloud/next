@@ -11,3 +11,6 @@ pub struct Money {
     pub currency: Currency,
     pub minor_units: u64,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AccountId(pub String);
