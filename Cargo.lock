@@ -28,6 +28,12 @@ dependencies = [
 [[package]]
 name = "runtime"
 version = "0.1.0"
+dependencies = [
+ "billing",
+ "identity",
+ "kernel",
+ "router",
+]
 
 [[package]]
 name = "supply"
