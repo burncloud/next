@@ -17,6 +17,12 @@ pub struct SpendLimit {
 pub struct RequestsPerMinute(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Admission {
+    Allowed,
+    Throttled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyLimit {
     pub spend: Option<SpendLimit>,
     pub requests_per_minute: Option<RequestsPerMinute>,
