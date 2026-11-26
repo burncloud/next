@@ -5,6 +5,6 @@ pub trait Adapter {
 
     /// # Errors
     ///
-    /// 响应体里的用量读不出来时返回 `Self::Error`。缺字段不是错误，读成 0。
+    /// 响应体里没有用量，或用量读不出来时，返回 `Self::Error`，不能当成 0。
     fn read_usage(&self, body: &[u8]) -> Result<TokenUsage, Self::Error>;
 }
