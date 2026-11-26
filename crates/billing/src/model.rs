@@ -1,4 +1,4 @@
-use kernel::model::{AccountId, Money, RequestId};
+use kernel::model::{AccountId, KeyId, Money, RequestId, UnixMillis};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TokenUsage {
@@ -23,6 +23,8 @@ pub enum LedgerAccount {
 pub struct Entry {
     pub request: RequestId,
     pub account: LedgerAccount,
+    pub key: Option<KeyId>,
     pub direction: Direction,
     pub amount: Money,
+    pub at: UnixMillis,
 }

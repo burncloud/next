@@ -1,4 +1,4 @@
-use kernel::model::{AccountId, Currency, Money, RequestId};
+use kernel::model::{AccountId, Currency, KeyId, Money, RequestId, UnixMillis};
 
 use crate::model::Entry;
 
@@ -27,6 +27,7 @@ pub trait Wallet {
         &self,
         request: &RequestId,
         account: &AccountId,
+        key: &KeyId,
         amount: Money,
     ) -> Result<(), Self::Error>;
 
@@ -41,6 +42,18 @@ pub trait Wallet {
     ///
     /// 没有这个 `request` 的冻结时返回 `Self::Error`。
     fn release(&self, request: &RequestId) -> Result<(), Self::Error>;
+
+    /// 返回该密钥自 `since` 起在 `currency` 下已结算的花费，加上当前冻结中的金额。`Daily`、`Monthly` 的 `since` 由调用方按 UTC 自然日、自然月的起点计算。
+    ///
+    /// # Errors
+    ///
+    /// 读取失败时返回 `Self::Error`。
+    fn spent(
+        &self,
+        key: &KeyId,
+        currency: Currency,
+        since: UnixMillis,
+    ) -> Result<Money, Self::Error>;
 }
 
 pub trait Ledger {
