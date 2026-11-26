@@ -21,6 +21,9 @@ version = "0.1.0"
 [[package]]
 name = "router"
 version = "0.1.0"
+dependencies = [
+ "billing",
+]
 
 [[package]]
 name = "runtime"
