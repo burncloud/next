@@ -43,7 +43,7 @@ pub trait Wallet {
     ///
     /// # Errors
     ///
-    /// 没有这个 `account` 和 `request` 的冻结时返回 `WalletError::Rejected(BillingRejection::HoldNotFound)`。`amount.currency` 与冻结币种不同时返回 `WalletError::Rejected(BillingRejection::CurrencyMismatch)`。实际金额超过冻结额时返回 `WalletError::Rejected(BillingRejection::SettlementExceedsHold)`。已经结算过时返回 `WalletError::Rejected(BillingRejection::AlreadySettled)`。这笔冻结已经释放过时返回 `WalletError::Rejected(BillingRejection::AlreadyReleased)`。存储失败时返回 `WalletError::Storage`。
+    /// 没有这个 `account` 和 `request` 的冻结时返回 `WalletError::Rejected(BillingRejection::HoldNotFound)`。`amount.currency` 与冻结币种不同时返回 `WalletError::Rejected(BillingRejection::CurrencyMismatch)`。实际金额超过冻结额时返回 `WalletError::Rejected(BillingRejection::SettlementExceedsHold)`。已经结算过时返回 `WalletError::Rejected(BillingRejection::AlreadySettled)`。这笔冻结已经释放过时返回 `WalletError::Rejected(BillingRejection::AlreadyReleased)`。金额相加溢出时返回 `WalletError::Rejected(BillingRejection::Overflow)`。存储失败时返回 `WalletError::Storage`。
     fn settle(
         &self,
         account: &AccountId,
