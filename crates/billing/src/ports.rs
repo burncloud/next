@@ -30,6 +30,8 @@ pub trait Wallet {
         amount: Money,
     ) -> Result<(), Self::Error>;
 
+    /// 按实际金额结算这笔冻结，结算后冻结结束，没用完的部分退回可用余额。
+    ///
     /// # Errors
     ///
     /// 没有这个 `request` 的冻结，或金额超过冻结额时，返回 `Self::Error`。同一个 `request` 再结算一次也返回 `Self::Error`，不能扣第二次。
@@ -46,6 +48,6 @@ pub trait Ledger {
 
     /// # Errors
     ///
-    /// 借贷不平、条目混用币种，或同一个 `request` 已经记过时，返回 `Self::Error`。
+    /// 借贷不平，或条目混用币种时，返回 `Self::Error`。
     fn record(&self, entries: &[Entry]) -> Result<(), Self::Error>;
 }
