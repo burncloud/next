@@ -3,11 +3,9 @@ use billing::model::{ModelUsage, TokenUsage};
 pub trait Adapter {
     type Error;
 
-    /// `input_tokens` 是上游输入数减去缓存命中数。
-    ///
     /// # Errors
     ///
-    /// 响应体里没有用量、用量读不出来、缓存命中数大于输入数，或出现不支持的计费项时，返回 `Self::Error`，不能当成 0。
+    /// 响应体里没有用量、用量读不出来、缓存命中数大于上游给的输入总数，或出现不支持的计费项时，返回 `Self::Error`，不能当成 0。
     fn read_usage(&self, body: &[u8]) -> Result<TokenUsage, Self::Error>;
 
     /// 按请求体估算用量上限，用来定冻结额。`cached_input_tokens` 为 0。`output_tokens` 取请求的最大输出；请求没带时，取实现给该模型配置的最大输出上限。

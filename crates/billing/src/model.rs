@@ -4,7 +4,7 @@ use kernel::model::{AccountId, KeyId, ModelId, Money, RequestId, UnixMillis};
 pub struct TokenUsage {
     /// 不含缓存命中的输入 token。
     pub input_tokens: u64,
-    /// 命中缓存的输入 token，与 `input_tokens` 不重叠。
+    /// 命中缓存的输入 token。
     pub cached_input_tokens: u64,
     /// 含推理 token。
     pub output_tokens: u64,
