@@ -2,22 +2,27 @@ use core::future::Future;
 use core::pin::pin;
 use core::task::{Context, Waker};
 
-use kernel::model::{AccountId, Currency, KeyId, Money, RequestId, UnixMillis};
+use kernel::model::{AccountId, Currency, KeyId, ModelId, Money, RequestId, UnixMillis};
 
 use billing::errors::{BillingRejection, WalletError};
-use billing::model::{Entry, KeyCap};
+use billing::model::{Entry, KeyCap, ModelUsage, TokenUsage};
 use billing::ports::{Ledger, Pricing, Wallet};
 
 struct Stub;
 
 impl Pricing for Stub {
-    type Usage = ();
+    type Usage = ModelUsage;
     type Error = ();
 
-    fn price(&self, _usage: &Self::Usage) -> Result<Money, Self::Error> {
+    fn price(&self, usage: &Self::Usage) -> Result<Money, Self::Error> {
+        if usage.model.0.is_empty() {
+            return Err(());
+        }
         Ok(Money {
             currency: Currency::Usd,
-            minor_units: 0,
+            minor_units: usage.tokens.input_tokens
+                + usage.tokens.cached_input_tokens
+                + usage.tokens.output_tokens,
         })
     }
 }
@@ -133,7 +138,30 @@ fn wallet_ledger_and_pricing_signatures_are_usable() {
     drive(wallet.held(&account, &request));
     drive(wallet.spent(&key, Currency::Usd, UnixMillis(0)));
     drive(Ledger::record(&wallet, &[]));
-    assert!(Pricing::price(&wallet, &()).is_ok());
+    let usage = ModelUsage {
+        model: ModelId(String::from("gpt-4o-mini")),
+        tokens: TokenUsage {
+            input_tokens: 1,
+            cached_input_tokens: 2,
+            output_tokens: 4,
+        },
+    };
+    assert_eq!(
+        Pricing::price(&wallet, &usage),
+        Ok(Money {
+            currency: Currency::Usd,
+            minor_units: 7,
+        })
+    );
+    let unpriced = ModelUsage {
+        model: ModelId(String::new()),
+        ..usage
+    };
+    assert_eq!(Pricing::price(&wallet, &unpriced), Err(()));
+    assert_ne!(
+        ModelId(String::from("gpt-4o")),
+        ModelId(String::from("GPT-4o"))
+    );
     assert_eq!(rejection_code(BillingRejection::DuplicateRequest), 1);
     assert!(matches!(
         WalletError::<()>::Rejected(BillingRejection::HoldNotFound),

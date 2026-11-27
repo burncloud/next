@@ -21,5 +21,9 @@ pub struct RequestId(pub String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyId(pub String);
 
+/// 按原样精确匹配，区分大小写，不做前缀或别名回退。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModelId(pub String);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UnixMillis(pub u64);

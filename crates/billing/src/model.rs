@@ -1,9 +1,19 @@
-use kernel::model::{AccountId, KeyId, Money, RequestId, UnixMillis};
+use kernel::model::{AccountId, KeyId, ModelId, Money, RequestId, UnixMillis};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TokenUsage {
+    /// 不含缓存命中的输入 token。
     pub input_tokens: u64,
+    /// 命中缓存的输入 token，与 `input_tokens` 不重叠。
+    pub cached_input_tokens: u64,
+    /// 含推理 token。
     pub output_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModelUsage {
+    pub model: ModelId,
+    pub tokens: TokenUsage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
