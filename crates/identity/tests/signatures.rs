@@ -2,9 +2,11 @@ use core::future::Future;
 use core::pin::pin;
 use core::task::{Context, Poll, Waker};
 
-use identity::model::{KeyLimit, Principal};
-use identity::ports::ApiKeys;
-use kernel::model::{AccountId, KeyId};
+use core::cell::Cell;
+
+use identity::model::{Admission, KeyLimit, Principal, RequestsPerMinute};
+use identity::ports::{ApiKeys, RateLimiter};
+use kernel::model::{AccountId, KeyId, UnixMillis};
 
 fn poll_once<T>(future: impl Future<Output = T>) -> Option<T> {
     let mut future = pin!(future);
@@ -65,4 +67,57 @@ fn api_keys_are_async() {
             requests_per_minute: None,
         })))
     );
+}
+
+struct Counter {
+    admitted: Cell<u32>,
+}
+
+impl RateLimiter for Counter {
+    type Error = ();
+
+    fn admit(
+        &self,
+        key: &KeyId,
+        limit: RequestsPerMinute,
+        now: UnixMillis,
+    ) -> impl Future<Output = Result<Admission, Self::Error>> + Send {
+        let result = if key.0.is_empty() || now.0 == 0 {
+            Err(())
+        } else if self.admitted.get() < limit.0 {
+            self.admitted.set(self.admitted.get() + 1);
+            Ok(Admission::Allowed)
+        } else {
+            Ok(Admission::Throttled)
+        };
+        core::future::ready(result)
+    }
+}
+
+#[test]
+fn rate_limiter_is_async() {
+    let limiter = Counter {
+        admitted: Cell::new(0),
+    };
+    let key = KeyId(String::from("k"));
+    let limit = RequestsPerMinute(2);
+    let now = UnixMillis(1);
+    assert_eq!(
+        poll_once(limiter.admit(&key, limit, now)),
+        Some(Ok(Admission::Allowed))
+    );
+    assert_eq!(
+        poll_once(limiter.admit(&key, limit, now)),
+        Some(Ok(Admission::Allowed))
+    );
+    assert_eq!(
+        poll_once(limiter.admit(&key, limit, now)),
+        Some(Ok(Admission::Throttled))
+    );
+    assert_eq!(limiter.admitted.get(), 2);
+    assert_eq!(
+        poll_once(limiter.admit(&KeyId(String::new()), limit, now)),
+        Some(Err(()))
+    );
+    assert_eq!(limiter.admitted.get(), 2);
 }

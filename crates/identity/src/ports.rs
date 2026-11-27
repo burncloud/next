@@ -35,5 +35,5 @@ pub trait RateLimiter {
         key: &KeyId,
         limit: RequestsPerMinute,
         now: UnixMillis,
-    ) -> Result<Admission, Self::Error>;
+    ) -> impl core::future::Future<Output = Result<Admission, Self::Error>> + Send;
 }
