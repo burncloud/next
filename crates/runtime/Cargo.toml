@@ -8,10 +8,10 @@ publish.workspace = true
 description.workspace = true
 
 [dependencies]
-kernel = { path = "../kernel", version = "=0.1.0" }
-identity = { path = "../identity", version = "=0.1.0" }
-billing = { path = "../billing", version = "=0.1.0" }
-router = { path = "../router", version = "=0.1.0" }
+kernel = { path = "../kernel", version = "=0.2.0" }
+identity = { path = "../identity", version = "=0.2.0" }
+billing = { path = "../billing", version = "=0.2.0" }
+router = { path = "../router", version = "=0.2.0" }
 
 [lints]
 workspace = true

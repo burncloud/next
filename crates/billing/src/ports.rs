@@ -9,7 +9,7 @@ pub trait Pricing {
 
     /// # Errors
     ///
-    /// 用量无法计价时返回 `Self::Error`。
+    /// 没配价格的模型、或金额溢出时返回 `Self::Error`，不按 0 计价，不回退到其他模型的价格。
     fn price(&self, usage: &Self::Usage) -> Result<Money, Self::Error>;
 }
 
