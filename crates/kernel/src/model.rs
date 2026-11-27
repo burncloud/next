@@ -21,6 +21,10 @@ pub struct RequestId(pub String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyId(pub String);
 
+/// 管理员入账的单号，在同一个账户内唯一。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CreditId(pub String);
+
 /// 按原样精确匹配，区分大小写，不做前缀或别名回退。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModelId(pub String);

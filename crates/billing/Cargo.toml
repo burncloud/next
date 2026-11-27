@@ -8,7 +8,7 @@ publish.workspace = true
 description.workspace = true
 
 [dependencies]
-kernel = { path = "../kernel", version = "=0.3.0" }
+kernel = { path = "../kernel", version = "=0.4.0" }
 
 [lints]
 workspace = true
