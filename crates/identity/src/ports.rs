@@ -8,12 +8,18 @@ pub trait ApiKeys {
     /// # Errors
     ///
     /// 校验过程失败时返回 `Self::Error`。密钥不存在、密钥未启用或账号未启用时返回 `Ok(None)`。
-    fn authenticate(&self, key: &str) -> Result<Option<Principal>, Self::Error>;
+    fn authenticate(
+        &self,
+        key: &str,
+    ) -> impl core::future::Future<Output = Result<Option<Principal>, Self::Error>> + Send;
 
     /// # Errors
     ///
     /// 读取限额失败时返回 `Self::Error`。没有这个 `KeyId` 时返回 `Ok(None)`。
-    fn limit(&self, key: &KeyId) -> Result<Option<KeyLimit>, Self::Error>;
+    fn limit(
+        &self,
+        key: &KeyId,
+    ) -> impl core::future::Future<Output = Result<Option<KeyLimit>, Self::Error>> + Send;
 }
 
 pub trait RateLimiter {
