@@ -24,7 +24,7 @@ pub trait UsageMeter: Send {
     /// 已经读到协议层的结束标记，例如 SSE 的 `[DONE]`，或完整的非流式响应体。
     fn ended(&self) -> bool;
 
-    /// 上游结束后调用一次，不论是否正常结束。上游正常结束（`ByteStream` 返回 `None` 且 `ended` 为真）时返回 `Err`，冻结挂起等对账并发 `UsageUnreadable`，不 `release`。
+    /// 上游结束后调用一次，不论是否正常结束。
     ///
     /// # Errors
     ///
