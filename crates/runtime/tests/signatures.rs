@@ -338,14 +338,14 @@ fn locate(rows: &[Suspended], pending: &PendingHold) -> Result<usize, ReconcileE
     }
 }
 
-fn priced_ok(pending: &PendingHold, priced: Money) -> Result<(), ReconcileError<()>> {
-    if priced.currency != Currency::Usd || pending.amount.currency != Currency::Usd {
+fn priced_ok(held: Money, priced: Money) -> Result<(), ReconcileError<()>> {
+    if priced.currency != Currency::Usd || held.currency != Currency::Usd {
         return Err(wallet_reject(BillingRejection::CurrencyMismatch));
     }
     if priced.minor_units == 0 {
         return Err(ReconcileError::ZeroPrice);
     }
-    if priced.minor_units > pending.amount.minor_units {
+    if priced.minor_units > held.minor_units {
         return Err(wallet_reject(BillingRejection::SettlementExceedsHold));
     }
     Ok(())
@@ -357,17 +357,19 @@ fn apply_settle(
     quote: ReconcileQuote,
 ) -> Result<(), ReconcileError<()>> {
     let index = locate(rows, pending)?;
+    let held = pending_of(&rows[index]).amount;
     match &rows[index] {
         Suspended::ReleaseUnfinished(_) => Err(ReconcileError::WrongAction),
         Suspended::SettleUnfinished { amount, .. } => match quote {
-            ReconcileQuote::Priced(priced) if priced == *amount => priced_ok(pending, priced),
+            ReconcileQuote::Missing => Err(ReconcileError::MissingPrice),
+            ReconcileQuote::Zero => Err(ReconcileError::ZeroPrice),
+            ReconcileQuote::Priced(priced) if priced == *amount => priced_ok(held, priced),
             ReconcileQuote::Priced(_) => Err(ReconcileError::AmountChanged),
-            ReconcileQuote::Missing | ReconcileQuote::Zero => Err(ReconcileError::WrongAction),
         },
         Suspended::UsageUnreadable(_) => match quote {
             ReconcileQuote::Missing => Err(ReconcileError::MissingPrice),
             ReconcileQuote::Zero => Err(ReconcileError::ZeroPrice),
-            ReconcileQuote::Priced(priced) => priced_ok(pending, priced),
+            ReconcileQuote::Priced(priced) => priced_ok(held, priced),
         },
     }?;
     rows.remove(index);
@@ -537,6 +539,26 @@ fn reconciliation_keeps_the_hold_id() {
         &unreadable,
         ReconcileQuote::Priced(usd(51)),
         Err(wallet_reject(BillingRejection::SettlementExceedsHold)),
+    );
+    let mut raised = unreadable.clone();
+    raised.amount = usd(80);
+    settle_is(
+        &books,
+        &raised,
+        ReconcileQuote::Priced(usd(60)),
+        Err(wallet_reject(BillingRejection::SettlementExceedsHold)),
+    );
+    settle_is(
+        &books,
+        &settle,
+        ReconcileQuote::Missing,
+        Err(ReconcileError::MissingPrice),
+    );
+    settle_is(
+        &books,
+        &settle,
+        ReconcileQuote::Zero,
+        Err(ReconcileError::ZeroPrice),
     );
     release_is(&books, &settle, Err(ReconcileError::WrongAction));
     settle_is(

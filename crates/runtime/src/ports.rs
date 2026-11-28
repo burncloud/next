@@ -24,7 +24,7 @@ pub trait Gateway {
     /// - 上游正常结束但读不到用量：不 `release`、不按 0 也不按冻结额结算，冻结挂起等对账，发 `UsageUnreadable`，照常返回响应体。这条进入 `Suspended::UsageUnreadable`。
     /// - 上游没有正常结束且没有用量，或响应头之前失败，或非 2xx：用这笔 `HoldId` `release`，不扣费。2xx 且 meter 的 `feed` 已报错时，释放之外再发 `MeterFailed`。
     ///
-    /// 调用方丢弃 `Reply::body`（客户端断开）时，读完上游的任务交给 `Spawn`，不能因丢弃而取消，按上面的结局处理。已经调用上游之后的内部错误不 `release`，冻结留给对账。结算没有完成进入 `Suspended::SettleUnfinished`，释放没有完成进入 `Suspended::ReleaseUnfinished`。显式动作只走 `Reconciliation`，并且必须交回原来的 `HoldId`。
+    /// 调用方丢弃 `Reply::body`（客户端断开）时，读完上游的任务交给 `Spawn`，不能因丢弃而取消，按上面的结局处理。结算或释放没有完成时，冻结留给对账：结算没有完成进入 `Suspended::SettleUnfinished`，释放没有完成进入 `Suspended::ReleaseUnfinished`。显式动作只走 `Reconciliation`，并且必须交回原来的 `HoldId`。
     ///
     /// `Lifetime` 的 `since` 是 `UnixMillis(0)`。`Daily`、`Monthly` 的 `since` 按 `Clock::now` 所在的 UTC 自然日、自然月起点算。
     ///
@@ -108,11 +108,11 @@ pub trait Reconciliation: Send + Sync + 'static {
 
     /// 显式结算。必须把 `pending.hold` 原样交给 `Wallet::settle`，并带上同一条的账户和请求。不能只按账户和请求结算。
     ///
-    /// `Suspended::UsageUnreadable` 在没有价格或价格为 0 时拒绝，不按 0、也不按冻结额结算，名单保留。`ReconcileQuote::Priced` 必须是 `USD`。超过 `pending.amount` 时拒绝，不改写成冻结额，也不另收超出部分。`Suspended::SettleUnfinished` 只能用名单上的那个金额再结算。`Suspended::ReleaseUnfinished` 不能改成结算。
+    /// `UsageUnreadable` 与 `SettleUnfinished` 在没有价格或价格为 0 时都拒绝，分别返回 `MissingPrice`、`ZeroPrice`，不按 0 结算，名单保留。`SettleUnfinished` 的 `Priced` 只能等于名单上记录的金额。币种不是 `USD` 时返回 `BillingRejection::CurrencyMismatch`。不向 `Wallet::settle` 提交大于名单里该条冻结额的金额。超额如何处置不在这里决定。`ReleaseUnfinished` 不能改成结算。比较用的冻结额是名单里匹配到的那一条，不是调用方传入的 `pending.amount`。
     ///
     /// # Errors
     ///
-    /// 账户和请求不在名单里时返回 `ReconcileError::NotSuspended`。`HoldId` 不符时返回 `ReconcileError::Wallet(WalletError::Rejected(BillingRejection::HoldMismatch))`，不结算、不释放。原因与动作不符时返回 `ReconcileError::WrongAction`。金额与未完成结算不同时返回 `ReconcileError::AmountChanged`。没有价格、价格为 0 时返回 `ReconcileError::MissingPrice`、`ReconcileError::ZeroPrice`。非 `USD`、超过冻结额，以及 `Wallet::settle` 的 `AlreadySettled`、`AlreadyReleased`、`HoldNotFound`、`Overflow`，放在 `ReconcileError::Wallet`。存储失败同样放在 `ReconcileError::Wallet`。这些拒绝都不改名单。
+    /// 账户和请求不在名单里时返回 `ReconcileError::NotSuspended`。`HoldId` 不符时返回 `ReconcileError::Wallet(WalletError::Rejected(BillingRejection::HoldMismatch))`，不结算、不释放。`ReleaseUnfinished` 返回 `ReconcileError::WrongAction`。`SettleUnfinished` 的 `Priced` 与名单金额不同时返回 `ReconcileError::AmountChanged`。没有价格、价格为 0 时，`UsageUnreadable` 与 `SettleUnfinished` 都返回 `ReconcileError::MissingPrice`、`ReconcileError::ZeroPrice`。非 `USD` 返回 `ReconcileError::Wallet(WalletError::Rejected(BillingRejection::CurrencyMismatch))`。大于名单里该条冻结额时返回 `BillingRejection::SettlementExceedsHold`。`HoldNotFound`、`Overflow` 和存储失败放在 `ReconcileError::Wallet`。这些情况都不改名单。`AlreadySettled` 与 `AlreadyReleased` 表示这笔冻结在钱包里已经结束，该条不再挂起，之后不得再出现在 `suspended` 里。
     fn settle(
         &self,
         pending: &PendingHold,
@@ -125,7 +125,7 @@ pub trait Reconciliation: Send + Sync + 'static {
     ///
     /// # Errors
     ///
-    /// 不在名单里时返回 `ReconcileError::NotSuspended`。`HoldId` 不符时返回 `ReconcileError::Wallet(WalletError::Rejected(BillingRejection::HoldMismatch))`，不释放。原因不允许释放时返回 `ReconcileError::WrongAction`。`Wallet::release` 的 `AlreadyReleased`、`AlreadySettled`、`HoldNotFound` 和存储失败放在 `ReconcileError::Wallet`。这些拒绝都不改名单。
+    /// 不在名单里时返回 `ReconcileError::NotSuspended`。`HoldId` 不符时返回 `ReconcileError::Wallet(WalletError::Rejected(BillingRejection::HoldMismatch))`，不释放。`SettleUnfinished` 返回 `ReconcileError::WrongAction`。`HoldNotFound` 和存储失败放在 `ReconcileError::Wallet`，名单不变。`AlreadyReleased` 与 `AlreadySettled` 表示这笔冻结在钱包里已经结束，该条不再挂起，之后不得再出现在 `suspended` 里。
     fn release(
         &self,
         pending: &PendingHold,
