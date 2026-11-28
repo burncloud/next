@@ -271,9 +271,59 @@ fn credit_debits_funding_and_credits_available() {
     drive(Ledger::record(&Stub, &[funding, available]));
 }
 
+struct Posted {
+    account: AccountId,
+    currency: Currency,
+    credit: CreditId,
+    amount: Money,
+}
+
 struct Funds {
-    opened: RefCell<bool>,
-    posted: RefCell<Option<Money>>,
+    opened: RefCell<Vec<(AccountId, Currency)>>,
+    posted: RefCell<Vec<Posted>>,
+}
+
+const fn accepts_currency(currency: Currency) -> bool {
+    match currency {
+        Currency::Usd => true,
+        Currency::Cny => false,
+    }
+}
+
+impl Funds {
+    fn is_open(&self, account: &AccountId, currency: Currency) -> bool {
+        self.opened
+            .borrow()
+            .iter()
+            .any(|(opened_account, opened_currency)| {
+                opened_account == account && *opened_currency == currency
+            })
+    }
+
+    fn recorded(
+        &self,
+        account: &AccountId,
+        currency: Currency,
+        credit: &CreditId,
+    ) -> Option<Money> {
+        self.posted.borrow().iter().find_map(|row| {
+            if row.account == *account && row.currency == currency && row.credit == *credit {
+                Some(row.amount)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn balance(&self, account: &AccountId, currency: Currency) -> Option<u64> {
+        self.posted.borrow().iter().try_fold(0_u64, |total, row| {
+            if row.account == *account && row.currency == currency {
+                total.checked_add(row.amount.minor_units)
+            } else {
+                Some(total)
+            }
+        })
+    }
 }
 
 impl Funding for Funds {
@@ -281,41 +331,58 @@ impl Funding for Funds {
 
     fn open_account(
         &self,
-        _account: &AccountId,
-        _currency: Currency,
+        account: &AccountId,
+        currency: Currency,
     ) -> impl Future<Output = Result<Opened, FundingError<Self::Error>>> + Send {
-        let mut opened = self.opened.borrow_mut();
-        let result = if *opened {
-            Opened::AlreadyOpen
+        let result = if accepts_currency(currency) {
+            if self.is_open(account, currency) {
+                Ok(Opened::AlreadyOpen)
+            } else {
+                self.opened.borrow_mut().push((account.clone(), currency));
+                Ok(Opened::Created)
+            }
         } else {
-            *opened = true;
-            Opened::Created
+            Err(FundingError::Rejected(
+                FundingRejection::UnsupportedCurrency,
+            ))
         };
-        core::future::ready(Ok(result))
+        core::future::ready(result)
     }
 
     fn credit(
         &self,
-        _account: &AccountId,
+        account: &AccountId,
         credit: &CreditId,
         amount: Money,
     ) -> impl Future<Output = Result<Credited, FundingError<Self::Error>>> + Send {
         let result = if credit.0.is_empty() {
-            Err(FundingError::Rejected(FundingRejection::EmptyCreditId))
+            rejected(FundingRejection::EmptyCreditId)
         } else if amount.minor_units == 0 {
-            Err(FundingError::Rejected(FundingRejection::ZeroAmount))
-        } else if !*self.opened.borrow() {
-            Err(FundingError::Rejected(FundingRejection::NotOpened))
-        } else {
-            let current = *self.posted.borrow();
-            match current {
-                Some(previous) if previous == amount => Ok(Credited::AlreadyApplied),
-                Some(_) => Err(FundingError::Rejected(FundingRejection::ConflictingCredit)),
-                None => {
-                    *self.posted.borrow_mut() = Some(amount);
-                    Ok(Credited::Applied)
-                }
+            rejected(FundingRejection::ZeroAmount)
+        } else if !accepts_currency(amount.currency) {
+            rejected(FundingRejection::UnsupportedCurrency)
+        } else if !self.is_open(account, amount.currency) {
+            rejected(FundingRejection::NotOpened)
+        } else if let Some(previous) = self.recorded(account, amount.currency, credit) {
+            if previous == amount {
+                Ok(Credited::AlreadyApplied)
+            } else {
+                rejected(FundingRejection::ConflictingCredit)
             }
+        } else if self
+            .balance(account, amount.currency)
+            .and_then(|total| total.checked_add(amount.minor_units))
+            .is_none()
+        {
+            rejected(FundingRejection::Overflow)
+        } else {
+            self.posted.borrow_mut().push(Posted {
+                account: account.clone(),
+                currency: amount.currency,
+                credit: credit.clone(),
+                amount,
+            });
+            Ok(Credited::Applied)
         };
         core::future::ready(result)
     }
@@ -346,8 +413,8 @@ fn rejected(reason: FundingRejection) -> Result<Credited, FundingError<()>> {
 #[test]
 fn funding_open_and_credit_cover_the_rejections() {
     let funds = Funds {
-        opened: RefCell::new(false),
-        posted: RefCell::new(None),
+        opened: RefCell::new(Vec::new()),
+        posted: RefCell::new(Vec::new()),
     };
     let account = AccountId(String::from("a"));
     let credit = CreditId(String::from("c-1"));
@@ -379,14 +446,83 @@ fn funding_open_and_credit_cover_the_rejections() {
         funds.credit(&account, &credit, usd(100)),
         Ok(Credited::AlreadyApplied),
     );
-    assert_eq!(*funds.posted.borrow(), Some(usd(100)));
+    assert_eq!(
+        funds.recorded(&account, Currency::Usd, &credit),
+        Some(usd(100))
+    );
     ready(
         funds.credit(&account, &credit, usd(50)),
         rejected(FundingRejection::ConflictingCredit),
     );
-    assert_eq!(*funds.posted.borrow(), Some(usd(100)));
+    assert_eq!(
+        funds.recorded(&account, Currency::Usd, &credit),
+        Some(usd(100))
+    );
+    assert_eq!(funds.posted.borrow().len(), 1);
     assert_eq!(funding_code(FundingRejection::ZeroAmount), 2);
     assert_eq!(funding_code(FundingRejection::ConflictingCredit), 4);
+}
+
+#[test]
+fn funding_rejects_unsupported_currency_and_overflow() {
+    let funds = Funds {
+        opened: RefCell::new(Vec::new()),
+        posted: RefCell::new(Vec::new()),
+    };
+    let account = AccountId(String::from("a"));
+    let other = AccountId(String::from("b"));
+    let credit = CreditId(String::from("c-max"));
+    let cny = Money {
+        currency: Currency::Cny,
+        minor_units: 1,
+    };
+    ready(
+        funds.open_account(&account, Currency::Cny),
+        Err(FundingError::Rejected(
+            FundingRejection::UnsupportedCurrency,
+        )),
+    );
+    ready(
+        funds.credit(&account, &credit, cny),
+        rejected(FundingRejection::UnsupportedCurrency),
+    );
+    assert!(funds.opened.borrow().is_empty());
+    assert!(funds.posted.borrow().is_empty());
+    ready(
+        funds.open_account(&account, Currency::Usd),
+        Ok(Opened::Created),
+    );
+    ready(
+        funds.open_account(&other, Currency::Usd),
+        Ok(Opened::Created),
+    );
+    ready(
+        funds.credit(&account, &credit, usd(u64::MAX)),
+        Ok(Credited::Applied),
+    );
+    ready(
+        funds.credit(&account, &credit, usd(u64::MAX)),
+        Ok(Credited::AlreadyApplied),
+    );
+    ready(
+        funds.credit(&account, &CreditId(String::from("c-more")), usd(1)),
+        rejected(FundingRejection::Overflow),
+    );
+    assert_eq!(
+        funds.recorded(&account, Currency::Usd, &credit),
+        Some(usd(u64::MAX))
+    );
+    assert_eq!(funds.recorded(&account, Currency::Cny, &credit), None);
+    assert_eq!(funds.posted.borrow().len(), 1);
+    ready(
+        funds.credit(&other, &credit, usd(u64::MAX)),
+        Ok(Credited::Applied),
+    );
+    assert_eq!(
+        funds.recorded(&other, Currency::Usd, &credit),
+        Some(usd(u64::MAX))
+    );
+    assert_eq!(funds.posted.borrow().len(), 2);
 }
 
 fn sample_pending() -> PendingHold {
