@@ -1,7 +1,7 @@
-use kernel::model::{AccountId, Currency, KeyId, Money, RequestId, UnixMillis};
+use kernel::model::{AccountId, CreditId, Currency, KeyId, Money, RequestId, UnixMillis};
 
-use crate::errors::WalletError;
-use crate::model::{Entry, HoldId, KeyCap};
+use crate::errors::{FundingError, WalletError};
+use crate::model::{Credited, Entry, HoldId, KeyCap, Opened};
 
 pub trait Pricing {
     type Usage;
@@ -96,4 +96,31 @@ pub trait Ledger {
         &self,
         entries: &[Entry],
     ) -> impl core::future::Future<Output = Result<(), WalletError<Self::Error>>> + Send;
+}
+
+pub trait Funding {
+    type Error;
+
+    /// 为 `account` 在 `currency` 下开户。第一次返回 `Opened::Created`，余额为 0。同一账户同一币种再开返回 `Opened::AlreadyOpen`，不改余额，也不写账本行。
+    ///
+    /// # Errors
+    ///
+    /// 实现不接受该 `currency` 时返回 `FundingError::Rejected(FundingRejection::UnsupportedCurrency)`。存储失败时返回 `FundingError::Storage`。
+    fn open_account(
+        &self,
+        account: &AccountId,
+        currency: Currency,
+    ) -> impl core::future::Future<Output = Result<Opened, FundingError<Self::Error>>> + Send;
+
+    /// 把 `amount` 记入已开户的账户。金额用 `Money` 的整数最小单位，不用浮点。同一账户的同一个 `CreditId` 只入一次：金额相同返回 `Credited::AlreadyApplied`，不再追加分录；金额不同被拒绝，已有分录保持原样。`Credited::Applied` 只追加两条金额相等的分录：借 `LedgerAccount::Funding`、贷 `LedgerAccount::Available`，`reference` 都是同一个 `EntryRef::Credit`，`key` 为 `None`。不修改已有账本行。
+    ///
+    /// # Errors
+    ///
+    /// 单号为空时返回 `FundingError::Rejected(FundingRejection::EmptyCreditId)`。`amount.minor_units` 为 0 时返回 `FundingError::Rejected(FundingRejection::ZeroAmount)`。`Money` 的最小单位是 `u64`，非正金额即 0。实现不接受 `amount.currency` 时返回 `FundingError::Rejected(FundingRejection::UnsupportedCurrency)`。该单号已经入过不同金额时返回 `FundingError::Rejected(FundingRejection::ConflictingCredit)`。该账户该币种尚未开户时返回 `FundingError::Rejected(FundingRejection::NotOpened)`。金额相加溢出时返回 `FundingError::Rejected(FundingRejection::Overflow)`。存储失败时返回 `FundingError::Storage`。
+    fn credit(
+        &self,
+        account: &AccountId,
+        credit: &CreditId,
+        amount: Money,
+    ) -> impl core::future::Future<Output = Result<Credited, FundingError<Self::Error>>> + Send;
 }
