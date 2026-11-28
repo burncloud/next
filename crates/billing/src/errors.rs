@@ -10,6 +10,7 @@ pub enum BillingRejection {
     AlreadyReleased,
     Unbalanced,
     Overflow,
+    HoldMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
