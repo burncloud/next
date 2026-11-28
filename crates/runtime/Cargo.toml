@@ -10,7 +10,7 @@ description.workspace = true
 [dependencies]
 kernel = { path = "../kernel", version = "=0.5.0" }
 identity = { path = "../identity", version = "=0.5.0" }
-billing = { path = "../billing", version = "=0.5.0" }
+billing = { path = "../billing", version = "=0.6.0" }
 router = { path = "../router", version = "=0.5.0" }
 
 [lints]
