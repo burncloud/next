@@ -56,3 +56,17 @@ pub struct KeyCap {
 /// 钱包为这一次冻结生成的归属令牌。每次成功的 `Wallet::hold` 返回一个新值。调用方只把它原样交还给 `settle` 和 `release`。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HoldId(pub String);
+
+/// 开户结果。同一账户同一币种再开一次是 `AlreadyOpen`，余额不变，也不写账本行。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Opened {
+    Created,
+    AlreadyOpen,
+}
+
+/// 入账结果。同一账户、同一 `CreditId`、同一金额再入一次是 `AlreadyApplied`，不再追加分录。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Credited {
+    Applied,
+    AlreadyApplied,
+}

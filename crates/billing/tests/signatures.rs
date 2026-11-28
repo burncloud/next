@@ -1,14 +1,16 @@
+use core::cell::RefCell;
 use core::future::Future;
 use core::pin::pin;
-use core::task::{Context, Waker};
+use core::task::{Context, Poll, Waker};
 
 use kernel::model::{AccountId, CreditId, Currency, KeyId, ModelId, Money, RequestId, UnixMillis};
 
-use billing::errors::{BillingRejection, WalletError};
+use billing::errors::{BillingRejection, FundingError, FundingRejection, WalletError};
 use billing::model::{
-    Direction, Entry, EntryRef, HoldId, KeyCap, LedgerAccount, ModelUsage, TokenUsage,
+    Credited, Direction, Entry, EntryRef, HoldId, KeyCap, LedgerAccount, ModelUsage, Opened,
+    TokenUsage,
 };
-use billing::ports::{Ledger, Pricing, Wallet};
+use billing::ports::{Funding, Ledger, Pricing, Wallet};
 
 struct Stub;
 
@@ -104,6 +106,12 @@ fn drive(future: impl Future + Send) {
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
     let _polled = future.as_mut().poll(&mut context);
+}
+
+fn ready<T: PartialEq + core::fmt::Debug>(future: impl Future<Output = T>, expected: T) {
+    let mut future = pin!(future);
+    let mut context = Context::from_waker(Waker::noop());
+    assert_eq!(future.as_mut().poll(&mut context), Poll::Ready(expected));
 }
 
 fn rejection_code(reason: BillingRejection) -> u8 {
@@ -238,6 +246,124 @@ fn credit_debits_funding_and_credits_available() {
     assert_eq!(funding.amount, available.amount);
     assert_ne!(funding.direction, available.direction);
     drive(Ledger::record(&Stub, &[funding, available]));
+}
+
+struct Funds {
+    opened: RefCell<bool>,
+    posted: RefCell<Option<Money>>,
+}
+
+impl Funding for Funds {
+    type Error = ();
+
+    fn open_account(
+        &self,
+        _account: &AccountId,
+        _currency: Currency,
+    ) -> impl Future<Output = Result<Opened, FundingError<Self::Error>>> + Send {
+        let mut opened = self.opened.borrow_mut();
+        let result = if *opened {
+            Opened::AlreadyOpen
+        } else {
+            *opened = true;
+            Opened::Created
+        };
+        core::future::ready(Ok(result))
+    }
+
+    fn credit(
+        &self,
+        _account: &AccountId,
+        credit: &CreditId,
+        amount: Money,
+    ) -> impl Future<Output = Result<Credited, FundingError<Self::Error>>> + Send {
+        let result = if credit.0.is_empty() {
+            Err(FundingError::Rejected(FundingRejection::EmptyCreditId))
+        } else if amount.minor_units == 0 {
+            Err(FundingError::Rejected(FundingRejection::ZeroAmount))
+        } else if !*self.opened.borrow() {
+            Err(FundingError::Rejected(FundingRejection::NotOpened))
+        } else {
+            let current = *self.posted.borrow();
+            match current {
+                Some(previous) if previous == amount => Ok(Credited::AlreadyApplied),
+                Some(_) => Err(FundingError::Rejected(FundingRejection::ConflictingCredit)),
+                None => {
+                    *self.posted.borrow_mut() = Some(amount);
+                    Ok(Credited::Applied)
+                }
+            }
+        };
+        core::future::ready(result)
+    }
+}
+
+fn funding_code(reason: FundingRejection) -> u8 {
+    match reason {
+        FundingRejection::UnsupportedCurrency => 0,
+        FundingRejection::EmptyCreditId => 1,
+        FundingRejection::ZeroAmount => 2,
+        FundingRejection::NotOpened => 3,
+        FundingRejection::ConflictingCredit => 4,
+        FundingRejection::Overflow => 5,
+    }
+}
+
+fn usd(minor_units: u64) -> Money {
+    Money {
+        currency: Currency::Usd,
+        minor_units,
+    }
+}
+
+fn rejected(reason: FundingRejection) -> Result<Credited, FundingError<()>> {
+    Err(FundingError::Rejected(reason))
+}
+
+#[test]
+fn funding_open_and_credit_cover_the_rejections() {
+    let funds = Funds {
+        opened: RefCell::new(false),
+        posted: RefCell::new(None),
+    };
+    let account = AccountId(String::from("a"));
+    let credit = CreditId(String::from("c-1"));
+    ready(
+        funds.credit(&account, &credit, usd(1)),
+        rejected(FundingRejection::NotOpened),
+    );
+    ready(
+        funds.credit(&account, &CreditId(String::new()), usd(1)),
+        rejected(FundingRejection::EmptyCreditId),
+    );
+    ready(
+        funds.credit(&account, &credit, usd(0)),
+        rejected(FundingRejection::ZeroAmount),
+    );
+    ready(
+        funds.open_account(&account, Currency::Usd),
+        Ok(Opened::Created),
+    );
+    ready(
+        funds.open_account(&account, Currency::Usd),
+        Ok(Opened::AlreadyOpen),
+    );
+    ready(
+        funds.credit(&account, &credit, usd(100)),
+        Ok(Credited::Applied),
+    );
+    ready(
+        funds.credit(&account, &credit, usd(100)),
+        Ok(Credited::AlreadyApplied),
+    );
+    assert_eq!(*funds.posted.borrow(), Some(usd(100)));
+    ready(
+        funds.credit(&account, &credit, usd(50)),
+        rejected(FundingRejection::ConflictingCredit),
+    );
+    assert_eq!(*funds.posted.borrow(), Some(usd(100)));
+    assert_eq!(funding_code(FundingRejection::ZeroAmount), 2);
+    assert_eq!(funding_code(FundingRejection::ConflictingCredit), 4);
 }
 
 #[test]
