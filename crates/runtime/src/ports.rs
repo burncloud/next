@@ -1,15 +1,15 @@
 use core::time::Duration;
 
-use billing::model::ModelUsage;
+use billing::model::{ModelUsage, PendingHold};
 use billing::ports::Pricing;
 use kernel::model::RequestId;
 use router::ports::ByteStream;
 
-use crate::errors::Rejection;
+use crate::errors::{ReconcileError, Rejection};
 use crate::events::{
     Fault, MeterFailed, SettlementCapped, Shortfall, UsageUnreadable, UsageUnreadableRatio,
 };
-use crate::model::Reply;
+use crate::model::{ReconcileQuote, Reply, Suspended};
 
 pub trait Gateway {
     type Error: From<Rejection>;
@@ -21,10 +21,10 @@ pub trait Gateway {
     ///
     /// 上游正常结束指 `ByteStream` 返回 `None` 且 `UsageMeter::ended` 为真。结局只有一个：
     /// - 读到用量：用这笔 `HoldId` 按真实用量 `settle`；实际费用超过冻结额或计价溢出时按冻结额封顶结算，并发 `SettlementCapped` 与 `Shortfall`。上游没有正常结束但读到了用量，也这样结算。
-    /// - 上游正常结束但读不到用量：不 `release`、不按 0 也不按冻结额结算，冻结挂起等对账，发 `UsageUnreadable`，照常返回响应体。
+    /// - 上游正常结束但读不到用量：不 `release`、不按 0 也不按冻结额结算，冻结挂起等对账，发 `UsageUnreadable`，照常返回响应体。这条进入 `Suspended::UsageUnreadable`。
     /// - 上游没有正常结束且没有用量，或响应头之前失败，或非 2xx：用这笔 `HoldId` `release`，不扣费。2xx 且 meter 的 `feed` 已报错时，释放之外再发 `MeterFailed`。
     ///
-    /// 调用方丢弃 `Reply::body`（客户端断开）时，读完上游的任务交给 `Spawn`，不能因丢弃而取消，按上面的结局处理。已经调用上游之后的内部错误不 `release`，冻结留给对账。
+    /// 调用方丢弃 `Reply::body`（客户端断开）时，读完上游的任务交给 `Spawn`，不能因丢弃而取消，按上面的结局处理。已经调用上游之后的内部错误不 `release`，冻结留给对账。结算没有完成进入 `Suspended::SettleUnfinished`，释放没有完成进入 `Suspended::ReleaseUnfinished`。显式动作只走 `Reconciliation`，并且必须交回原来的 `HoldId`。
     ///
     /// `Lifetime` 的 `since` 是 `UnixMillis(0)`。`Daily`、`Monthly` 的 `since` 按 `Clock::now` 所在的 UTC 自然日、自然月起点算。
     ///
@@ -87,4 +87,47 @@ pub trait Report: Send + Sync + 'static {
 
     /// 编排中的内部失败。
     fn fault(&self, fault: &Fault);
+}
+
+/// 列出挂起的冻结，并带着原来的 `HoldId` 显式结算或释放。
+///
+/// 不接受时间上界，不自动过期，列出时不结算、不释放。挂起多久、要不要自动处理，不在这里决定。账本只插入，不改已有行；只使用 `USD`。
+pub trait Reconciliation: Send + Sync + 'static {
+    type Error: Send;
+
+    /// 返回仍挂起的冻结，按 `created_at`、账户、请求排序。没有则空列表。
+    ///
+    /// 只包括 `Suspended` 的三种。不包括仍在读取或转发的冻结，不包括上游失败或断开且没有用量时已经释放的冻结，也不包括客户端断开后已经按实际用量结算的冻结。每条 `pending.hold` 都是 `Wallet::hold` 返回的 `HoldId`。
+    ///
+    /// # Errors
+    ///
+    /// 读不到名单时返回 `ReconcileError::Wallet(WalletError::Storage)`。
+    fn suspended(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<Suspended>, ReconcileError<Self::Error>>> + Send;
+
+    /// 显式结算。必须把 `pending.hold` 原样交给 `Wallet::settle`，并带上同一条的账户和请求。不能只按账户和请求结算。
+    ///
+    /// `Suspended::UsageUnreadable` 在没有价格或价格为 0 时拒绝，不按 0、也不按冻结额结算，名单保留。`ReconcileQuote::Priced` 必须是 `USD`。超过 `pending.amount` 时拒绝，不改写成冻结额，也不另收超出部分。`Suspended::SettleUnfinished` 只能用名单上的那个金额再结算。`Suspended::ReleaseUnfinished` 不能改成结算。
+    ///
+    /// # Errors
+    ///
+    /// 账户和请求不在名单里时返回 `ReconcileError::NotSuspended`。`HoldId` 不符时返回 `ReconcileError::Wallet(WalletError::Rejected(BillingRejection::HoldMismatch))`，不结算、不释放。原因与动作不符时返回 `ReconcileError::WrongAction`。金额与未完成结算不同时返回 `ReconcileError::AmountChanged`。没有价格、价格为 0 时返回 `ReconcileError::MissingPrice`、`ReconcileError::ZeroPrice`。非 `USD`、超过冻结额，以及 `Wallet::settle` 的 `AlreadySettled`、`AlreadyReleased`、`HoldNotFound`、`Overflow`，放在 `ReconcileError::Wallet`。存储失败同样放在 `ReconcileError::Wallet`。这些拒绝都不改名单。
+    fn settle(
+        &self,
+        pending: &PendingHold,
+        quote: ReconcileQuote,
+    ) -> impl core::future::Future<Output = Result<(), ReconcileError<Self::Error>>> + Send;
+
+    /// 显式释放，不扣费。必须把 `pending.hold` 原样交给 `Wallet::release`。
+    ///
+    /// `Suspended::ReleaseUnfinished` 和 `Suspended::UsageUnreadable` 可以释放。`Suspended::SettleUnfinished` 不能改成释放。不因时间过去而调用。上游失败或断开且没有用量时，网关已经释放，那些冻结不经过本方法。
+    ///
+    /// # Errors
+    ///
+    /// 不在名单里时返回 `ReconcileError::NotSuspended`。`HoldId` 不符时返回 `ReconcileError::Wallet(WalletError::Rejected(BillingRejection::HoldMismatch))`，不释放。原因不允许释放时返回 `ReconcileError::WrongAction`。`Wallet::release` 的 `AlreadyReleased`、`AlreadySettled`、`HoldNotFound` 和存储失败放在 `ReconcileError::Wallet`。这些拒绝都不改名单。
+    fn release(
+        &self,
+        pending: &PendingHold,
+    ) -> impl core::future::Future<Output = Result<(), ReconcileError<Self::Error>>> + Send;
 }
