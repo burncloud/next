@@ -5,17 +5,18 @@ use core::time::Duration;
 
 use std::sync::Mutex;
 
-use billing::model::{ModelUsage, TokenUsage};
+use billing::errors::{BillingRejection, WalletError};
+use billing::model::{HoldId, ModelUsage, PendingHold, TokenUsage};
 use billing::ports::Pricing;
 use kernel::model::{AccountId, Currency, KeyId, ModelId, Money, RequestId, UnixMillis};
 use router::ports::ByteStream;
-use runtime::errors::Rejection;
+use runtime::errors::{ReconcileError, Rejection};
 use runtime::events::{
     ActualCost, Fault, MeterFailed, SettlementCapped, Shortfall, Stage, UsageUnreadable,
     UsageUnreadableRatio,
 };
-use runtime::model::Reply;
-use runtime::ports::{Gateway, PriceSource, Report, RequestIds, Spawn};
+use runtime::model::{ReconcileQuote, Reply, Suspended};
+use runtime::ports::{Gateway, PriceSource, Reconciliation, Report, RequestIds, Spawn};
 
 fn poll_once<T>(future: impl Future<Output = T>) -> Option<T> {
     let mut future = pin!(future);
@@ -291,4 +292,292 @@ fn request_ids_do_not_repeat_and_spawn_finishes() {
     assert_ne!(ids.next_id(), ids.next_id());
     Spawner.spawn(core::future::ready(()));
     assert_eq!(poll_once(Spawner.sleep(Duration::from_millis(1))), Some(()));
+}
+
+fn usd(minor_units: u64) -> Money {
+    Money {
+        currency: Currency::Usd,
+        minor_units,
+    }
+}
+
+fn hold(id: &str, account: &str, request: &str, at: u64, minor: u64) -> PendingHold {
+    PendingHold {
+        hold: HoldId(String::from(id)),
+        account: AccountId(String::from(account)),
+        request: RequestId(String::from(request)),
+        key: KeyId(String::from("k")),
+        amount: usd(minor),
+        created_at: UnixMillis(at),
+    }
+}
+
+fn pending_of(item: &Suspended) -> &PendingHold {
+    match item {
+        Suspended::UsageUnreadable(pending)
+        | Suspended::ReleaseUnfinished(pending)
+        | Suspended::SettleUnfinished { pending, .. } => pending,
+    }
+}
+
+fn wallet_reject(rejection: BillingRejection) -> ReconcileError<()> {
+    ReconcileError::Wallet(WalletError::Rejected(rejection))
+}
+
+fn locate(rows: &[Suspended], pending: &PendingHold) -> Result<usize, ReconcileError<()>> {
+    let Some(index) = rows.iter().position(|item| {
+        let row = pending_of(item);
+        row.account == pending.account && row.request == pending.request
+    }) else {
+        return Err(ReconcileError::NotSuspended);
+    };
+    if pending_of(&rows[index]).hold == pending.hold {
+        Ok(index)
+    } else {
+        Err(wallet_reject(BillingRejection::HoldMismatch))
+    }
+}
+
+fn priced_ok(held: Money, priced: Money) -> Result<(), ReconcileError<()>> {
+    if priced.currency != Currency::Usd || held.currency != Currency::Usd {
+        return Err(wallet_reject(BillingRejection::CurrencyMismatch));
+    }
+    if priced.minor_units == 0 {
+        return Err(ReconcileError::ZeroPrice);
+    }
+    if priced.minor_units > held.minor_units {
+        return Err(wallet_reject(BillingRejection::SettlementExceedsHold));
+    }
+    Ok(())
+}
+
+fn apply_settle(
+    rows: &mut Vec<Suspended>,
+    pending: &PendingHold,
+    quote: ReconcileQuote,
+) -> Result<(), ReconcileError<()>> {
+    let index = locate(rows, pending)?;
+    let held = pending_of(&rows[index]).amount;
+    match &rows[index] {
+        Suspended::ReleaseUnfinished(_) => Err(ReconcileError::WrongAction),
+        Suspended::SettleUnfinished { amount, .. } => match quote {
+            ReconcileQuote::Missing => Err(ReconcileError::MissingPrice),
+            ReconcileQuote::Zero => Err(ReconcileError::ZeroPrice),
+            ReconcileQuote::Priced(priced) if priced == *amount => priced_ok(held, priced),
+            ReconcileQuote::Priced(_) => Err(ReconcileError::AmountChanged),
+        },
+        Suspended::UsageUnreadable(_) => match quote {
+            ReconcileQuote::Missing => Err(ReconcileError::MissingPrice),
+            ReconcileQuote::Zero => Err(ReconcileError::ZeroPrice),
+            ReconcileQuote::Priced(priced) => priced_ok(held, priced),
+        },
+    }?;
+    rows.remove(index);
+    Ok(())
+}
+
+fn apply_release(
+    rows: &mut Vec<Suspended>,
+    pending: &PendingHold,
+) -> Result<(), ReconcileError<()>> {
+    let index = locate(rows, pending)?;
+    match &rows[index] {
+        Suspended::SettleUnfinished { .. } => Err(ReconcileError::WrongAction),
+        Suspended::UsageUnreadable(_) | Suspended::ReleaseUnfinished(_) => {
+            rows.remove(index);
+            Ok(())
+        }
+    }
+}
+
+fn sorted(rows: &[Suspended]) -> Vec<Suspended> {
+    let mut rows = rows.to_vec();
+    rows.sort_by(|left, right| {
+        let left = pending_of(left);
+        let right = pending_of(right);
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| left.account.0.cmp(&right.account.0))
+            .then_with(|| left.request.0.cmp(&right.request.0))
+    });
+    rows
+}
+
+struct Books(Mutex<Vec<Suspended>>);
+
+impl Reconciliation for Books {
+    type Error = ();
+
+    fn suspended(&self) -> impl Future<Output = Result<Vec<Suspended>, ReconcileError<()>>> + Send {
+        let rows = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        core::future::ready(Ok(sorted(&rows)))
+    }
+
+    fn settle(
+        &self,
+        pending: &PendingHold,
+        quote: ReconcileQuote,
+    ) -> impl Future<Output = Result<(), ReconcileError<()>>> + Send {
+        let mut rows = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        core::future::ready(apply_settle(&mut rows, pending, quote))
+    }
+
+    fn release(
+        &self,
+        pending: &PendingHold,
+    ) -> impl Future<Output = Result<(), ReconcileError<()>>> + Send {
+        let mut rows = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        core::future::ready(apply_release(&mut rows, pending))
+    }
+}
+
+fn sample_books() -> Books {
+    Books(Mutex::new(vec![
+        Suspended::SettleUnfinished {
+            pending: hold("s", "b", "rs", 20, 40),
+            amount: usd(15),
+        },
+        Suspended::UsageUnreadable(hold("u", "a", "ru", 10, 50)),
+        Suspended::UsageUnreadable(hold("v", "a", "rv", 11, 30)),
+        Suspended::ReleaseUnfinished(hold("r", "a", "rr", 15, 7)),
+    ]))
+}
+
+fn requests_of(rows: &[Suspended]) -> Vec<&str> {
+    rows.iter()
+        .map(|item| pending_of(item).request.0.as_str())
+        .collect()
+}
+
+fn rows_of(books: &Books) -> Vec<Suspended> {
+    match poll_once(books.suspended()) {
+        Some(Ok(rows)) => rows,
+        Some(Err(_)) | None => Vec::new(),
+    }
+}
+
+fn settle_is(
+    books: &Books,
+    pending: &PendingHold,
+    quote: ReconcileQuote,
+    expected: Result<(), ReconcileError<()>>,
+) {
+    assert_eq!(poll_once(books.settle(pending, quote)), Some(expected));
+}
+
+fn release_is(books: &Books, pending: &PendingHold, expected: Result<(), ReconcileError<()>>) {
+    assert_eq!(poll_once(books.release(pending)), Some(expected));
+}
+
+const OPEN: [&str; 4] = ["ru", "rv", "rr", "rs"];
+
+#[test]
+fn reconciliation_keeps_the_hold_id() {
+    let books = sample_books();
+    let rows = rows_of(&books);
+    assert_eq!(requests_of(&rows), OPEN);
+    assert_eq!(rows_of(&books), rows);
+    let unreadable = pending_of(&rows[0]).clone();
+    let priced = pending_of(&rows[1]).clone();
+    let release = pending_of(&rows[2]).clone();
+    let settle = pending_of(&rows[3]).clone();
+    let mut forged = unreadable.clone();
+    forged.hold = HoldId(String::from("other"));
+    let unknown = hold("x", "z", "rx", 1, 3);
+    let mismatch = wallet_reject(BillingRejection::HoldMismatch);
+    settle_is(
+        &books,
+        &unknown,
+        ReconcileQuote::Priced(usd(1)),
+        Err(ReconcileError::NotSuspended),
+    );
+    settle_is(
+        &books,
+        &forged,
+        ReconcileQuote::Priced(usd(10)),
+        Err(mismatch.clone()),
+    );
+    release_is(&books, &forged, Err(mismatch));
+    settle_is(
+        &books,
+        &unreadable,
+        ReconcileQuote::Missing,
+        Err(ReconcileError::MissingPrice),
+    );
+    settle_is(
+        &books,
+        &unreadable,
+        ReconcileQuote::Zero,
+        Err(ReconcileError::ZeroPrice),
+    );
+    settle_is(
+        &books,
+        &unreadable,
+        ReconcileQuote::Priced(usd(0)),
+        Err(ReconcileError::ZeroPrice),
+    );
+    settle_is(
+        &books,
+        &unreadable,
+        ReconcileQuote::Priced(Money {
+            currency: Currency::Cny,
+            minor_units: 10,
+        }),
+        Err(wallet_reject(BillingRejection::CurrencyMismatch)),
+    );
+    settle_is(
+        &books,
+        &unreadable,
+        ReconcileQuote::Priced(usd(51)),
+        Err(wallet_reject(BillingRejection::SettlementExceedsHold)),
+    );
+    let mut raised = unreadable.clone();
+    raised.amount = usd(80);
+    settle_is(
+        &books,
+        &raised,
+        ReconcileQuote::Priced(usd(60)),
+        Err(wallet_reject(BillingRejection::SettlementExceedsHold)),
+    );
+    settle_is(
+        &books,
+        &settle,
+        ReconcileQuote::Missing,
+        Err(ReconcileError::MissingPrice),
+    );
+    settle_is(
+        &books,
+        &settle,
+        ReconcileQuote::Zero,
+        Err(ReconcileError::ZeroPrice),
+    );
+    release_is(&books, &settle, Err(ReconcileError::WrongAction));
+    settle_is(
+        &books,
+        &settle,
+        ReconcileQuote::Priced(usd(14)),
+        Err(ReconcileError::AmountChanged),
+    );
+    settle_is(
+        &books,
+        &release,
+        ReconcileQuote::Priced(usd(1)),
+        Err(ReconcileError::WrongAction),
+    );
+    assert_eq!(requests_of(&rows_of(&books)), OPEN);
+    settle_is(&books, &priced, ReconcileQuote::Priced(usd(10)), Ok(()));
+    release_is(&books, &unreadable, Ok(()));
+    settle_is(&books, &settle, ReconcileQuote::Priced(usd(15)), Ok(()));
+    release_is(&books, &release, Ok(()));
+    assert_eq!(rows_of(&books), Vec::new());
+    release_is(&books, &unreadable, Err(ReconcileError::NotSuspended));
 }
