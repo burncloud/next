@@ -52,3 +52,7 @@ pub struct KeyCap {
     pub since: UnixMillis,
     pub limit: Money,
 }
+
+/// 钱包为这一次冻结生成的归属令牌。每次成功的 `Wallet::hold` 返回一个新值。调用方只把它原样交还给 `settle` 和 `release`。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HoldId(pub String);

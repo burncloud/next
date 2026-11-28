@@ -5,7 +5,9 @@ use core::task::{Context, Waker};
 use kernel::model::{AccountId, CreditId, Currency, KeyId, ModelId, Money, RequestId, UnixMillis};
 
 use billing::errors::{BillingRejection, WalletError};
-use billing::model::{Direction, Entry, EntryRef, KeyCap, LedgerAccount, ModelUsage, TokenUsage};
+use billing::model::{
+    Direction, Entry, EntryRef, HoldId, KeyCap, LedgerAccount, ModelUsage, TokenUsage,
+};
 use billing::ports::{Ledger, Pricing, Wallet};
 
 struct Stub;
@@ -45,7 +47,7 @@ impl Wallet for Stub {
         _key: &KeyId,
         _cap: Option<KeyCap>,
         _amount: Money,
-    ) -> impl Future<Output = Result<(), WalletError<Self::Error>>> + Send {
+    ) -> impl Future<Output = Result<HoldId, WalletError<Self::Error>>> + Send {
         core::future::pending()
     }
 
@@ -53,6 +55,7 @@ impl Wallet for Stub {
         &self,
         _account: &AccountId,
         _request: &RequestId,
+        _hold: &HoldId,
         _amount: Money,
     ) -> impl Future<Output = Result<(), WalletError<Self::Error>>> + Send {
         core::future::pending()
@@ -62,6 +65,7 @@ impl Wallet for Stub {
         &self,
         _account: &AccountId,
         _request: &RequestId,
+        _hold: &HoldId,
     ) -> impl Future<Output = Result<(), WalletError<Self::Error>>> + Send {
         core::future::pending()
     }
@@ -114,6 +118,7 @@ fn rejection_code(reason: BillingRejection) -> u8 {
         BillingRejection::AlreadyReleased => 7,
         BillingRejection::Unbalanced => 8,
         BillingRejection::Overflow => 9,
+        BillingRejection::HoldMismatch => 10,
     }
 }
 
@@ -131,10 +136,11 @@ fn wallet_ledger_and_pricing_signatures_are_usable() {
         since: UnixMillis(0),
         limit: amount,
     };
+    let hold = HoldId(String::from("owned"));
     drive(wallet.balance(&account, Currency::Usd));
     drive(wallet.hold(&account, &request, &key, Some(cap), amount));
-    drive(wallet.settle(&account, &request, amount));
-    drive(wallet.release(&account, &request));
+    drive(wallet.settle(&account, &request, &hold, amount));
+    drive(wallet.release(&account, &request, &hold));
     drive(wallet.held(&account, &request));
     drive(wallet.spent(&key, Currency::Usd, UnixMillis(0)));
     drive(Ledger::record(&wallet, &[]));
@@ -163,6 +169,20 @@ fn wallet_ledger_and_pricing_signatures_are_usable() {
         ModelId(String::from("GPT-4o"))
     );
     assert_eq!(rejection_code(BillingRejection::DuplicateRequest), 1);
+    assert_eq!(rejection_code(BillingRejection::HoldMismatch), 10);
+    assert_ne!(
+        BillingRejection::HoldMismatch,
+        BillingRejection::HoldNotFound
+    );
+    assert_ne!(
+        BillingRejection::HoldMismatch,
+        BillingRejection::AlreadyReleased
+    );
+    assert_ne!(
+        BillingRejection::HoldMismatch,
+        BillingRejection::AlreadySettled
+    );
+    assert_ne!(hold, HoldId(String::from("other")));
     assert!(matches!(
         WalletError::<()>::Rejected(BillingRejection::HoldNotFound),
         WalletError::Rejected(BillingRejection::HoldNotFound)

@@ -4,25 +4,25 @@ version = 4
 
 [[package]]
 name = "billing"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "kernel",
 ]
 
 [[package]]
 name = "identity"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "kernel",
 ]
 
 [[package]]
 name = "kernel"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "router"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "billing",
  "kernel",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "runtime"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "billing",
  "identity",
@@ -40,4 +40,4 @@ dependencies = [
 
 [[package]]
 name = "supply"
-version = "0.4.0"
+version = "0.5.0"
