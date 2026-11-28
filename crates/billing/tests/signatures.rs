@@ -8,7 +8,7 @@ use kernel::model::{AccountId, CreditId, Currency, KeyId, ModelId, Money, Reques
 use billing::errors::{BillingRejection, FundingError, FundingRejection, WalletError};
 use billing::model::{
     Credited, Direction, Entry, EntryRef, HoldId, KeyCap, LedgerAccount, ModelUsage, Opened,
-    TokenUsage,
+    PendingHold, TokenUsage,
 };
 use billing::ports::{Funding, Ledger, Pricing, Wallet};
 
@@ -88,6 +88,19 @@ impl Wallet for Stub {
     ) -> impl Future<Output = Result<Money, WalletError<Self::Error>>> + Send {
         core::future::pending()
     }
+
+    fn open_holds_created_before(
+        &self,
+        cutoff: UnixMillis,
+    ) -> impl Future<Output = Result<Vec<PendingHold>, WalletError<Self::Error>>> + Send {
+        let pending = sample_pending();
+        let listed = if pending.created_at < cutoff {
+            vec![pending]
+        } else {
+            Vec::new()
+        };
+        core::future::ready(Ok(listed))
+    }
 }
 
 impl Ledger for Stub {
@@ -106,6 +119,15 @@ fn drive(future: impl Future + Send) {
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
     let _polled = future.as_mut().poll(&mut context);
+}
+
+fn take_ready<T>(future: impl Future<Output = T> + Send) -> Option<T> {
+    let mut future = pin!(future);
+    let mut context = Context::from_waker(Waker::noop());
+    match future.as_mut().poll(&mut context) {
+        Poll::Ready(value) => Some(value),
+        Poll::Pending => None,
+    }
 }
 
 fn ready<T: PartialEq + core::fmt::Debug>(future: impl Future<Output = T>, expected: T) {
@@ -151,6 +173,7 @@ fn wallet_ledger_and_pricing_signatures_are_usable() {
     drive(wallet.release(&account, &request, &hold));
     drive(wallet.held(&account, &request));
     drive(wallet.spent(&key, Currency::Usd, UnixMillis(0)));
+    drive(wallet.open_holds_created_before(UnixMillis(0)));
     drive(Ledger::record(&wallet, &[]));
     let usage = ModelUsage {
         model: ModelId(String::from("gpt-4o-mini")),
@@ -364,6 +387,43 @@ fn funding_open_and_credit_cover_the_rejections() {
     assert_eq!(*funds.posted.borrow(), Some(usd(100)));
     assert_eq!(funding_code(FundingRejection::ZeroAmount), 2);
     assert_eq!(funding_code(FundingRejection::ConflictingCredit), 4);
+}
+
+fn sample_pending() -> PendingHold {
+    PendingHold {
+        hold: HoldId(String::from("owned")),
+        account: AccountId(String::from("a")),
+        request: RequestId(String::from("r")),
+        key: KeyId(String::from("k")),
+        amount: usd(10),
+        created_at: UnixMillis(100),
+    }
+}
+
+#[test]
+fn open_hold_id_is_passed_to_settle_and_release() {
+    let wallet = Stub;
+    ready(
+        wallet.open_holds_created_before(UnixMillis(100)),
+        Ok(Vec::new()),
+    );
+    let listed = take_ready(wallet.open_holds_created_before(UnixMillis(200)));
+    assert!(matches!(
+        listed,
+        Some(Ok(ref holds)) if holds.len() == 1
+    ));
+    if let Some(Ok(holds)) = listed {
+        let pending = &holds[0];
+        assert_eq!(pending, &sample_pending());
+        drive(wallet.settle(
+            &pending.account,
+            &pending.request,
+            &pending.hold,
+            pending.amount,
+        ));
+        drive(wallet.release(&pending.account, &pending.request, &pending.hold));
+        assert_ne!(pending.hold, HoldId(String::from("other")));
+    }
 }
 
 #[test]
