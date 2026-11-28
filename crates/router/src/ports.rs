@@ -36,7 +36,7 @@ pub trait Adapter {
     type Error;
     type Meter: UsageMeter;
 
-    /// `limit` 是冻结用的用量上限：`cached_input_tokens` 为 0；`output_tokens` 取请求的最大输出，请求没带时取实现给该模型配置的最大输出上限。`upstream_body` 是发给上游的请求体。
+    /// `limit` 是冻结用的用量上限：`cached_input_tokens` 为 0；`output_tokens` 取请求的最大输出，请求没带时取实现给该模型配置的最大输出上限。`upstream_body` 是发给上游的请求体。请求没带 `service_tier` 时按 `default` 写入 `upstream_body`；其他档位是不支持的计费档位。最大输出上限仍不能按默认值估算。
     ///
     /// # Errors
     ///
