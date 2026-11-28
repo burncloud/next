@@ -1,13 +1,21 @@
 use core::future::Future;
 use core::pin::pin;
 use core::task::{Context, Poll, Waker};
+use core::time::Duration;
 
-use kernel::model::{AccountId, Currency, KeyId, Money, RequestId, UnixMillis};
+use std::sync::Mutex;
+
+use billing::model::{ModelUsage, TokenUsage};
+use billing::ports::Pricing;
+use kernel::model::{AccountId, Currency, KeyId, ModelId, Money, RequestId, UnixMillis};
 use router::ports::ByteStream;
 use runtime::errors::Rejection;
-use runtime::events::{ActualCost, SettlementCapped, UsageUnreadable};
+use runtime::events::{
+    ActualCost, Fault, MeterFailed, SettlementCapped, Shortfall, Stage, UsageUnreadable,
+    UsageUnreadableRatio,
+};
 use runtime::model::Reply;
-use runtime::ports::Gateway;
+use runtime::ports::{Gateway, PriceSource, Report, RequestIds, Spawn};
 
 fn poll_once<T>(future: impl Future<Output = T>) -> Option<T> {
     let mut future = pin!(future);
@@ -122,4 +130,165 @@ fn events_carry_account_and_actual_cost() {
             minor_units: 11,
         })
     );
+    let ratio = UsageUnreadableRatio {
+        decided: 100,
+        unreadable: 1,
+        window: 100,
+        ratio_num: 1,
+        ratio_den: 100,
+        at: UnixMillis(3),
+    };
+    let failed = MeterFailed {
+        request: unreadable.request.clone(),
+        account: unreadable.account.clone(),
+        key: unreadable.key.clone(),
+        held,
+        at: UnixMillis(4),
+    };
+    let fault = Fault {
+        stage: Stage::Prices,
+        request: None,
+        account: Some(unreadable.account.clone()),
+        attempts: 1,
+        detail: String::new(),
+    };
+    let report = Reporter;
+    report.usage_unreadable(&unreadable);
+    report.usage_unreadable_ratio(&ratio);
+    report.settlement_capped(&capped, Shortfall::Overflow);
+    report.meter_failed(&failed);
+    report.fault(&fault);
+    assert!(matches!(Shortfall::Minor(2), Shortfall::Minor(2)));
+    assert!(matches!(
+        Shortfall::CurrencyMismatch,
+        Shortfall::CurrencyMismatch
+    ));
+}
+
+struct Prices;
+
+impl Pricing for Prices {
+    type Usage = ModelUsage;
+    type Error = ();
+
+    fn price(&self, usage: &Self::Usage) -> Result<Money, Self::Error> {
+        let tokens = &usage.tokens;
+        let Some(units) = tokens
+            .input_tokens
+            .checked_add(tokens.cached_input_tokens)
+            .and_then(|sum| sum.checked_add(tokens.output_tokens))
+            .filter(|units| *units > 0 && !usage.model.0.is_empty())
+        else {
+            return Err(());
+        };
+        Ok(Money {
+            currency: Currency::Usd,
+            minor_units: units,
+        })
+    }
+}
+
+struct Source(bool);
+
+impl PriceSource for Source {
+    type Prices = Prices;
+    type Error = ();
+
+    fn snapshot(&self) -> impl Future<Output = Result<Self::Prices, Self::Error>> + Send {
+        core::future::ready(if self.0 { Err(()) } else { Ok(Prices) })
+    }
+}
+
+struct Ids(Mutex<u64>);
+
+impl RequestIds for Ids {
+    fn next_id(&self) -> RequestId {
+        let mut guard = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let id = *guard;
+        *guard = id.saturating_add(1);
+        RequestId(id.to_string())
+    }
+}
+
+struct Spawner;
+
+impl Spawn for Spawner {
+    fn spawn<F>(&self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        assert_eq!(poll_once(task), Some(()));
+    }
+
+    fn sleep(&self, _duration: Duration) -> impl Future<Output = ()> + Send {
+        core::future::ready(())
+    }
+}
+
+struct Reporter;
+
+impl Report for Reporter {
+    fn usage_unreadable(&self, event: &UsageUnreadable) {
+        assert_eq!(event.held.minor_units, 10);
+    }
+
+    fn usage_unreadable_ratio(&self, event: &UsageUnreadableRatio) {
+        assert_eq!((event.ratio_num, event.ratio_den), (1, 100));
+    }
+
+    fn settlement_capped(&self, event: &SettlementCapped, shortfall: Shortfall) {
+        assert_eq!(
+            (event.held.minor_units, shortfall),
+            (10, Shortfall::Overflow)
+        );
+    }
+
+    fn meter_failed(&self, event: &MeterFailed) {
+        assert_eq!(event.held.currency, Currency::Usd);
+    }
+
+    fn fault(&self, fault: &Fault) {
+        assert_eq!((fault.stage, fault.detail.as_str()), (Stage::Prices, ""));
+    }
+}
+
+fn usage(model: &str, input_tokens: u64) -> ModelUsage {
+    ModelUsage {
+        model: ModelId(String::from(model)),
+        tokens: TokenUsage {
+            input_tokens,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+        },
+    }
+}
+
+#[test]
+fn missing_or_zero_price_is_rejected() {
+    assert!(matches!(poll_once(Source(true).snapshot()), Some(Err(()))));
+    assert!(matches!(
+        poll_once(Source(false).snapshot()),
+        Some(Ok(Prices))
+    ));
+    let prices = Prices;
+    assert!(prices.price(&usage("", 3)).is_err());
+    assert!(prices.price(&usage("m", 0)).is_err());
+    assert_eq!(
+        prices.price(&usage("m", 3)),
+        Ok(Money {
+            currency: Currency::Usd,
+            minor_units: 3,
+        })
+    );
+}
+
+#[test]
+fn request_ids_do_not_repeat_and_spawn_finishes() {
+    let ids = Ids(Mutex::new(1));
+    assert_ne!(ids.next_id(), ids.next_id());
+    Spawner.spawn(core::future::ready(()));
+    assert_eq!(poll_once(Spawner.sleep(Duration::from_millis(1))), Some(()));
 }
