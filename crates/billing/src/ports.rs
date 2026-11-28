@@ -122,11 +122,11 @@ pub trait Funding {
         currency: Currency,
     ) -> impl core::future::Future<Output = Result<Opened, FundingError<Self::Error>>> + Send;
 
-    /// 把 `amount` 记入已开户的账户。金额用 `Money` 的整数最小单位，不用浮点。同一账户的同一个 `CreditId` 只入一次：金额相同返回 `Credited::AlreadyApplied`，不再追加分录；金额不同被拒绝，已有分录保持原样。`Credited::Applied` 只追加两条金额相等的分录：借 `LedgerAccount::Funding`、贷 `LedgerAccount::Available`，`reference` 都是同一个 `EntryRef::Credit`，`key` 为 `None`。不修改已有账本行。
+    /// 把 `amount` 记入已开户的账户。金额用 `Money` 的整数最小单位，不用浮点。同一账户的同一个 `CreditId` 只入一次：金额相同返回 `Credited::AlreadyApplied`，不再追加分录；金额不同被拒绝，已有分录保持原样。返回 `Credited::Applied` 时，只追加两条金额相等的分录，这两条分录和该 `CreditId` 的幂等记录必须原子地一起提交：借 `LedgerAccount::Funding`、贷同一个 `account` 的 `LedgerAccount::Available(account)`，`reference` 都是同一个 `EntryRef::Credit`，`key` 为 `None`。并发调用或存储失败后的重试，同一账户的同一个 `CreditId` 最多只留下一对完整分录。不修改已有账本行。
     ///
     /// # Errors
     ///
-    /// 单号为空时返回 `FundingError::Rejected(FundingRejection::EmptyCreditId)`。`amount.minor_units` 为 0 时返回 `FundingError::Rejected(FundingRejection::ZeroAmount)`。`Money` 的最小单位是 `u64`，非正金额即 0。实现不接受 `amount.currency` 时返回 `FundingError::Rejected(FundingRejection::UnsupportedCurrency)`。该单号已经入过不同金额时返回 `FundingError::Rejected(FundingRejection::ConflictingCredit)`。该账户该币种尚未开户时返回 `FundingError::Rejected(FundingRejection::NotOpened)`。金额相加溢出时返回 `FundingError::Rejected(FundingRejection::Overflow)`。存储失败时返回 `FundingError::Storage`。
+    /// 单号为空时返回 `FundingError::Rejected(FundingRejection::EmptyCreditId)`。`amount.minor_units` 为 0 时返回 `FundingError::Rejected(FundingRejection::ZeroAmount)`。`Money` 的最小单位是 `u64`，非正金额即 0。实现不接受 `amount.currency` 时返回 `FundingError::Rejected(FundingRejection::UnsupportedCurrency)`。该单号已经入过不同金额时返回 `FundingError::Rejected(FundingRejection::ConflictingCredit)`。该账户该币种尚未开户时返回 `FundingError::Rejected(FundingRejection::NotOpened)`。金额相加溢出时返回 `FundingError::Rejected(FundingRejection::Overflow)`。返回 `FundingError::Storage` 时不得留下单边分录，也不得只写幂等记录而没有那对分录。
     fn credit(
         &self,
         account: &AccountId,
