@@ -1,7 +1,7 @@
 use kernel::model::{AccountId, CreditId, Currency, KeyId, Money, RequestId, UnixMillis};
 
 use crate::errors::{FundingError, WalletError};
-use crate::model::{Credited, Entry, HoldId, KeyCap, Opened};
+use crate::model::{Credited, Entry, HoldId, KeyCap, Opened, PendingHold};
 
 pub trait Pricing {
     type Usage;
@@ -84,6 +84,16 @@ pub trait Wallet {
         currency: Currency,
         since: UnixMillis,
     ) -> impl core::future::Future<Output = Result<Money, WalletError<Self::Error>>> + Send;
+
+    /// 列出 `created_at` 早于 `cutoff` 的未结束冻结，按 `created_at`、账户、请求排序。`created_at` 等于 `cutoff` 的不在结果里。已结算和已释放的不在结果里。没有符合的冻结时返回空列表。每条 `hold` 都是 `Wallet::hold` 返回过的 `HoldId`，调用方可以把它原样交给 `settle` 或 `release`。`cutoff` 只限定查询范围，不表示这批冻结已经过期。
+    ///
+    /// # Errors
+    ///
+    /// 读不到这些冻结时返回 `WalletError::Storage`。
+    fn open_holds_created_before(
+        &self,
+        cutoff: UnixMillis,
+    ) -> impl core::future::Future<Output = Result<Vec<PendingHold>, WalletError<Self::Error>>> + Send;
 }
 
 pub trait Ledger {

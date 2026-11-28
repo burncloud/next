@@ -57,6 +57,17 @@ pub struct KeyCap {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HoldId(pub String);
 
+/// 一笔尚未结算、也尚未释放的冻结。`hold` 是 `Wallet::hold` 当时返回的 `HoldId`，不是 `key`。调用方把它原样交给 `settle` 或 `release`。`created_at` 是冻结写入时的时刻。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PendingHold {
+    pub hold: HoldId,
+    pub account: AccountId,
+    pub request: RequestId,
+    pub key: KeyId,
+    pub amount: Money,
+    pub created_at: UnixMillis,
+}
+
 /// 开户结果。同一账户同一币种再开一次是 `AlreadyOpen`，余额不变，也不写账本行。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Opened {
